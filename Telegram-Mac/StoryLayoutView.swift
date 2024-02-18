@@ -11,9 +11,19 @@ import TGUIKit
 import TelegramCore
 import SwiftSignalKit
 import Postbox
-
+import TelegramMedia
+import MediaPlayer
 
 class StoryLayoutView : Control {
+    
+    var isHighQuality: Bool = true
+    
+    var media: EngineMedia? {
+        if let story = self.story {
+            return isHighQuality ? story.media : (story.alternativeMedia ?? story.media)
+        }
+        return nil
+    }
     
     fileprivate var magnifyView: MagnifyView!
     
@@ -244,8 +254,8 @@ class StoryLayoutView : Control {
     func appear(isMuted: Bool) {
         self.updateState(.waiting)
         
-        if let story = self.story, let context = self.context {
-            switch story.media {
+        if let story = self.story, let context = self.context, let media = self.media {
+            switch media {
             case let .image(image):
                 if let representation = largestImageRepresentation(image.representations) {
                     self.priorityDisposable.set(context.engine.resources.pushPriorityDownload(resourceId: representation.resource.id.stringRepresentation))
@@ -326,7 +336,7 @@ class StoryLayoutView : Control {
     
     static public var size: NSSize = NSMakeSize(9 * 40, 16 * 40)
     
-    static func makeView(for story: EngineStoryItem, peerId: PeerId, peer: Peer?, context: AccountContext, frame: NSRect) -> StoryLayoutView {
+    static func makeView(for story: EngineStoryItem, isHighQuality: Bool, peerId: PeerId, peer: Peer?, context: AccountContext, frame: NSRect) -> StoryLayoutView {
         let view: StoryLayoutView
         if story.media._asMedia() is TelegramMediaImage {
             view = StoryImageView(frame: frame)
@@ -335,6 +345,7 @@ class StoryLayoutView : Control {
         } else {
             view = StoryUnsupportedView(frame: frame)
         }
+        view.isHighQuality = isHighQuality
         view.update(context: context, peerId: peerId, story: story, peer: peer)
         view.initializeStatus()
         return view
@@ -405,7 +416,7 @@ class StoryImageView : StoryLayoutView {
         
         super.update(context: context, peerId: peerId, story: story, peer: peer)
         
-        guard let peer = peer, let peerReference = PeerReference(peer) else {
+        guard let peer = peer, let peerReference = PeerReference(peer), let media = self.media?._asMedia() else {
             return
         }
         
@@ -416,9 +427,7 @@ class StoryImageView : StoryLayoutView {
         
         let size = frame.size
         var dimensions: NSSize = size
-        
-        let media = story.media._asMedia()
-        
+                
         if let image = media as? TelegramMediaImage {
             dimensions = image.representations.first?.dimensions.size ?? dimensions
         } else if let file = media as? TelegramMediaFile {
@@ -511,11 +520,11 @@ class StoryVideoView : StoryImageView {
     override func update(context: AccountContext, peerId: PeerId, story: EngineStoryItem, peer: Peer?) {
         super.update(context: context, peerId: peerId, story: story, peer: peer)
         
-        guard let peer = peer, let peerReference = PeerReference(peer) else {
+        guard let peer = peer, let peerReference = PeerReference(peer), let media = self.media?._asMedia() else {
             return
         }
         
-        let file = story.media._asMedia() as! TelegramMediaFile
+        let file = media as! TelegramMediaFile
         let reference = FileMediaReference.story(peer: peerReference, id: story.id, media: file)
         let mediaPlayer = MediaPlayer(postbox: context.account.postbox, userLocation: .peer(peerId), userContentType: .video, reference: reference.resourceReference(file.resource), streamable: true, video: true, preferSoftwareDecoding: false, isSeekable: false, enableSound: true, fetchAutomatically: true)
                 

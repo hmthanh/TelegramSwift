@@ -292,10 +292,6 @@ open class View : NSView, CALayerDelegate, AppearanceViewProtocol {
         
     }
     
-    @available(OSX 10.12.2, *)
-    open override func makeTouchBar() -> NSTouchBar? {
-        return viewEnableTouchBar ? super.makeTouchBar() : nil
-    }
     
     public var flip:Bool = true
     
@@ -362,43 +358,33 @@ open class View : NSView, CALayerDelegate, AppearanceViewProtocol {
     
     public init() {
         super.init(frame: NSZeroRect)
-        assertOnMainThread()
-        self.autoresizesSubviews = false
-        self.wantsLayer = true
-        acceptsTouchEvents = true
-        self.layerContentsRedrawPolicy = .onSetNeedsDisplay
-        layer?.disableActions()
-        layer?.backgroundColor = backgroundColor.cgColor
-       // self.layer?.delegate = self
-        self.layer?.isOpaque = true
-       // self.autoresizesSubviews = false
-       // self.layerContentsRedrawPolicy = .onSetNeedsDisplay
-       // self.layer?.drawsAsynchronously = System.drawAsync
-        if #available(macOS 10.15, *) {
-            self.layer?.cornerCurve = .continuous
-        }
-        self.layer?.masksToBounds = true
-       // self.translatesAutoresizingMaskIntoConstraints = false
+        initialize()
     }
     
     override required public init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         assertOnMainThread()
+        initialize()
+    }
+    
+    private func initialize() {
         acceptsTouchEvents = true
         self.wantsLayer = true
+        //let layer = SimpleLayer()
+        //self.layer = layer
         self.layer?.masksToBounds = true
         self.autoresizesSubviews = false
-        layer?.disableActions()
-        layer?.backgroundColor = backgroundColor.cgColor
-     //   self.layer?.delegate = self
+        self.layer?.disableActions()
+        
+        self.layer?.backgroundColor = backgroundColor.cgColor
         self.layer?.isOpaque = true
         self.layerContentsRedrawPolicy = .onSetNeedsDisplay
-      //  self.layer?.drawsAsynchronously = System.drawAsync
         if #available(macOS 10.15, *) {
             self.layer?.cornerCurve = .continuous
         }
-       // self.translatesAutoresizingMaskIntoConstraints = false
-
+//        layer.onDraw = { [weak self] layer, ctx in
+//            self?.draw(layer, in: ctx)
+//        }
     }
     
     
@@ -559,7 +545,7 @@ open class View : NSView, CALayerDelegate, AppearanceViewProtocol {
     
     
     open override func draw(_ dirtyRect: NSRect) {
-       
+       super.draw(dirtyRect)
     }
     
     public var hasVisibleModal:Bool {

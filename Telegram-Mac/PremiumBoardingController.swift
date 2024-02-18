@@ -13,6 +13,7 @@ import TelegramCore
 import Postbox
 import InAppPurchaseManager
 import CurrencyFormat
+import MediaPlayer
 
 struct PremiumEmojiStatusInfo : Equatable {
     let status: PeerEmojiStatus
@@ -52,6 +53,7 @@ enum PremiumLogEventsSource : Equatable {
     case profile(PeerId)
     case gift(from: PeerId, to: PeerId, months: Int32, slug: String?, unclaimed: Bool)
     case story_viewers
+    case stories_quality
     case send_as
     case translations
     case stories__stealth_mode
@@ -59,6 +61,9 @@ enum PremiumLogEventsSource : Equatable {
     case channel_boost(PeerId)
     case no_ads
     case recommended_channels
+    case last_seen
+    case messages_privacy
+    case saved_tags
     var value: String {
         switch self {
         case let .deeplink(ref):
@@ -91,6 +96,8 @@ enum PremiumLogEventsSource : Equatable {
             return "stories__stealth_mode"
         case .story_viewers:
             return "stories__viewers"
+        case .stories_quality:
+            return "stories__quality"
         case .stories__save_to_gallery:
             return "stories__save_to_gallery"
         case let .channel_boost(peerId):
@@ -99,6 +106,12 @@ enum PremiumLogEventsSource : Equatable {
             return "no_ads"
         case .recommended_channels:
             return "recommended_channels"
+        case .last_seen:
+            return "last_seen"
+        case .messages_privacy:
+            return "messages_privacy"
+        case .saved_tags:
+            return "saved_tags"
         }
     }
     
@@ -130,6 +143,8 @@ enum PremiumLogEventsSource : Equatable {
             return .stories
         case .story_viewers:
             return .stories
+        case .stories_quality:
+            return .stories
         case .stories__save_to_gallery:
             return .stories
         case .channel_boost:
@@ -138,6 +153,12 @@ enum PremiumLogEventsSource : Equatable {
             return .no_ads
         case .recommended_channels:
             return nil
+        case .last_seen:
+            return nil
+        case .messages_privacy:
+            return nil
+        case .saved_tags:
+            return .saved_tags
         }
     }
     
@@ -234,6 +255,7 @@ enum PremiumValue : String {
     case stories
     case wallpapers
     case peer_colors
+    case saved_tags
     func gradient(_ index: Int) -> [NSColor] {
         let colors:[NSColor] = [ NSColor(rgb: 0xef6922),
                                  NSColor(rgb: 0xe95a2c),
@@ -251,7 +273,8 @@ enum PremiumValue : String {
                                  NSColor(rgb: 0x429bd5),
                                  NSColor(rgb: 0x41a6a5),
                                  NSColor(rgb: 0x3eb26d),
-                                 NSColor(rgb: 0x3dbd4a)]
+                                 NSColor(rgb: 0x3dbd4a),
+                                 NSColor(rgb: 0x51c736)]
         return [colors[index]]
     }
     
@@ -325,6 +348,8 @@ enum PremiumValue : String {
             return NSImage(named: "Icon_Premium_Wallpapers")!.precomposed(presentation.colors.accent)
         case .peer_colors:
             return NSImage(named: "Icon_Premium_Peer_Colors")!.precomposed(presentation.colors.accent)
+        case .saved_tags:
+            return NSImage(named: "Icon_Premium_Boarding_Tag")!.precomposed(presentation.colors.accent)
         }
     }
     
@@ -362,6 +387,8 @@ enum PremiumValue : String {
             return strings().premiumBoardingWallpapersTitle
         case .peer_colors:
             return strings().premiumBoardingColorsTitle
+        case .saved_tags:
+            return strings().premiumBoardingSavedTagsTitle
         }
     }
     func info(_ limits: PremiumLimitConfig) -> String {
@@ -398,6 +425,8 @@ enum PremiumValue : String {
             return strings().premiumBoardingWallpapersInfo
         case .peer_colors:
             return strings().premiumBoardingColorsInfo
+        case .saved_tags:
+            return strings().premiumBoardingSavedTagsInfo
         }
     }
 }
@@ -405,7 +434,7 @@ enum PremiumValue : String {
 
 
 private struct State : Equatable {
-    var values:[PremiumValue] = [.double_limits, .stories, .more_upload, .faster_download, .voice_to_text, .no_ads, .infinite_reactions, .emoji_status, .premium_stickers, .animated_emoji, .advanced_chat_management, .profile_badge, .animated_userpics, .translations]
+    var values:[PremiumValue] = [.double_limits, .stories, .more_upload, .faster_download, .voice_to_text, .no_ads, .infinite_reactions, .emoji_status, .premium_stickers, .animated_emoji, .advanced_chat_management, .profile_badge, .animated_userpics, .translations, .saved_tags]
     let source: PremiumLogEventsSource
     
     var premiumProduct: InAppPurchaseManager.Product?
@@ -931,6 +960,10 @@ final class PremiumBoardingController : ModalViewController {
         self.openFeatures = openFeatures
         self.presentation = presentation
         super.init(frame: NSMakeRect(0, 0, 380, 530))
+    }
+    
+    override var hasBorder: Bool {
+        return false
     }
     
     override func measure(size: NSSize) {

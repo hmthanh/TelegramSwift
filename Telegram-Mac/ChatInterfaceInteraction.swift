@@ -47,6 +47,7 @@ final class ChatInteraction : InterfaceObserver  {
     let isLogInteraction:Bool
     let disableSelectAbility: Bool
     let isGlobalSearchMessage: Bool
+    let isPeerSavedMessages: Bool
     private let modifyDisposable:MetaDisposable = MetaDisposable()
     private let mediaDisposable:MetaDisposable = MetaDisposable()
     private let startBotDisposable:MetaDisposable = MetaDisposable()
@@ -59,12 +60,13 @@ final class ChatInteraction : InterfaceObserver  {
     
    
     
-    init(chatLocation: ChatLocation, context: AccountContext, mode: ChatMode = .history, isLogInteraction: Bool = false, disableSelectAbility: Bool = false, isGlobalSearchMessage: Bool = false) {
+    init(chatLocation: ChatLocation, context: AccountContext, mode: ChatMode = .history, isLogInteraction: Bool = false, disableSelectAbility: Bool = false, isGlobalSearchMessage: Bool = false, isPeerSavedMessages: Bool = false) {
         self.chatLocation = chatLocation
         self.context = context
         self.disableSelectAbility = disableSelectAbility
         self.isLogInteraction = isLogInteraction
         self.isGlobalSearchMessage = isGlobalSearchMessage
+        self.isPeerSavedMessages = isPeerSavedMessages
         self.presentation = ChatPresentationInterfaceState(chatLocation: chatLocation, chatMode: mode)
         self.mode = mode
         super.init()
@@ -202,6 +204,7 @@ final class ChatInteraction : InterfaceObserver  {
     var setupChatThemes:()->Void = { }
     var closeChatThemes:()->Void = { }
     var appendAttributedText:(NSAttributedString)->Void = { _ in }
+    var setLocationTag:(HistoryViewInputTag?)->Void = { _ in }
     
     var toggleUnderMouseMessage:()->Void = { }
     
@@ -627,7 +630,7 @@ final class ChatInteraction : InterfaceObserver  {
                 update(animated: animated, {
                     $0.withoutInitialAction()
                 })
-                showModal(with: WebpageModalController(context: context, url: url, title: botApp.title, requestData: nil, chatInteraction: self, thumbFile: MenuAnimation.menu_folder_bot.file), for: context.window)
+                showModal(with: WebpageModalController(context: context, url: url, title: botApp.title, requestData: nil, chatInteraction: self, thumbFile: MenuAnimation.menu_folder_bot.file, botPeer: botPeer.peer), for: context.window)
             case .makeWebview:
                 update(animated: animated, {
                     $0.withoutInitialAction()

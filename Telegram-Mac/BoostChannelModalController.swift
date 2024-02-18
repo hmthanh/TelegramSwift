@@ -13,7 +13,7 @@ import TGUIKit
 import SwiftSignalKit
 import TelegramCore
 import Postbox
-
+import TelegramMedia
 
 func requiredBoostSubjectLevel(subject: BoostSubject, context: AccountContext, configuration: PremiumConfiguration) -> Int32 {
     switch subject {
@@ -996,7 +996,7 @@ private func entries(_ state: State, arguments: Arguments) -> [InputDataEntry] {
     }
 
     
-    if let nextLevels = nextLevels, state.infoOnly {
+    if let nextLevels = nextLevels {
         for level in nextLevels {
             var perks: [BoostChannelPerk] = []
             perks.append(.story(level))

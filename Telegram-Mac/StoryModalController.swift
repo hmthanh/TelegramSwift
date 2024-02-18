@@ -13,7 +13,7 @@ import TelegramCore
 import SwiftSignalKit
 import ColorPalette
 import TGModernGrowingTextView
-
+import InAppSettings
 
 private final class ReadThrottledProcessingManager {
     
@@ -248,6 +248,8 @@ final class StoryInteraction : InterfaceObserver {
         }
         FastSettings.storyIsMuted = self.presentation.isMuted
     }
+    
+    
     func flushPauses() {
         self.update { current in
             var current = current
@@ -607,11 +609,11 @@ private func storyReactionsValues(context: AccountContext, peerId: PeerId, react
             }, onClose: onClose, presentation: darkAppearance, name: name)
             window.show(view)
         }
-        
+                
         let view = ContextAddReactionsListView(frame: rect, context: context, list: available, add: { value, checkPrem, fromRect in
             onClose()
             react(.init(item: value.toUpdate(), fromRect: fromRect))
-        }, radiusLayer: nil, revealReactions: reveal, presentation: darkAppearance, hasBubble: false)
+        }, radiusLayer: nil, revealReactions: reveal, presentation: darkAppearance, hasBubble: false, aboveText: nil)
         
         return (panel, view)
     } |> deliverOnMainQueue
@@ -2623,6 +2625,35 @@ final class StoryModalController : ModalViewController, Notifable {
                     }, itemImage: MenuAnimation.menu_statistics.value))
                 }
                 
+                if let presentaion = self?.arguments?.interaction.presentation {
+                    if context.isPremium {
+                        
+                        let hq = self?.genericView.storyContext?.stateValue?.slice?.additionalPeerData.preferHighQualityStories ?? false
+                        
+                        menu.addItem(ContextMenuItem.init(hq ? strings().storyContextLowerQuality : strings().storyContextIncreaseQuality, handler: {
+                            
+                            _ = updateBaseAppSettingsInteractively(accountManager: context.sharedContext.accountManager, {
+                                $0.withUpdatedStoriesQuaility(!hq)
+                            }).startStandalone()
+                            
+                            let title: String
+                            let text: String
+                            if hq {
+                                title = strings().storyContextLowerQualityTooltipTitle
+                                text = strings().storyContextLowerQualityTooltipText
+                            } else {
+                                title = strings().storyContextIncreaseQualityTooltipTitle
+                                text = strings().storyContextIncreaseQualityTooltipText
+                            }
+                            showModalText(for: context.window, text: text, title: title)
+                        }, itemImage: hq ? MenuAnimation.menu_sd.value : MenuAnimation.menu_hd.value))
+                    } else {
+                        menu.addItem(ContextMenuItem(strings().storyContextIncreaseQuality, handler: {
+                            showModal(with: PremiumBoardingController(context: context, source: .stories_quality, openFeatures: true, presentation: darkAppearance), for: context.window)
+                        }, itemImage: MenuAnimation.menu_hd_lock.value))
+                    }
+                }
+                
                 if !story.storyItem.isForwardingDisabled {
                     let resource: TelegramMediaFile?
                     if let media = story.storyItem.media._asMedia() as? TelegramMediaImage {
@@ -2991,7 +3022,6 @@ final class StoryModalController : ModalViewController, Notifable {
                     || findModal(ShareModalController.self, isAboveTo: self) != nil
                     || findModal(StoryStealthModeController.self, isAboveTo: self) != nil
                     || findModal(PremiumBoardingController.self, isAboveTo: self) != nil
-                    || findModal(ShareStoryController.self, isAboveTo: self) != nil
                     || findModal(StoryModalController.self, isAboveTo: self) != nil
                     current.hasPopover = hasPopover(context.window) && !current.hasModal
                     return current

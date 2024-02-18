@@ -9,7 +9,7 @@
 import Cocoa
 import TGUIKit
 import TelegramCore
-
+import TelegramMedia
 import Postbox
 import SwiftSignalKit
 
@@ -359,7 +359,7 @@ final class PeerMediaVoiceRowView : PeerMediaRowView, APDelegate {
             
             if song.entry.isEqual(to: item.message), case .playing = song.state {
                 progressView.theme = RadialProgressTheme(backgroundColor: backgroundColor, foregroundColor: foregroundColor, icon: theme.icons.chatMusicPause, iconInset:NSEdgeInsets(left:0))
-                progressView.state = .Icon(image: theme.icons.chatMusicPause, mode: .normal)
+                progressView.state = .Icon(image: theme.icons.chatMusicPause)
             } else {
                 progressView.theme = RadialProgressTheme(backgroundColor: backgroundColor, foregroundColor: foregroundColor, icon: theme.icons.chatMusicPlay, iconInset:NSEdgeInsets(left:1))
                 progressView.state = .Play

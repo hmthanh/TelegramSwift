@@ -180,7 +180,7 @@ func generateTextIcon(_ text: NSAttributedString) -> CGImage {
 }
 
 func generateTextIcon_NewBadge(bgColor: NSColor, textColor: NSColor) -> CGImage {
-    return generateTextIcon_AccentBadge(text: "NEW", bgColor: bgColor, textColor: textColor)
+    return generateTextIcon_AccentBadge(text: strings().badgeNew, bgColor: bgColor, textColor: textColor)
 }
 
 func generateTextIcon_AccentBadge(text: String, bgColor: NSColor, textColor: NSColor) -> CGImage {
@@ -2009,11 +2009,12 @@ class TelegramPresentationTheme : PresentationTheme {
             return backgroundMode
         }
     }
-    init(colors: ColorPalette, cloudTheme: TelegramTheme?, search: SearchTheme, chatList: TelegramChatListTheme, tabBar: TelegramTabBarTheme, icons: TelegramIconsTheme, bubbled: Bool, fontSize: CGFloat, wallpaper: ThemeWallpaper, generated: Bool = false, emoticonThemes: [(String, TelegramPresentationTheme)] = []) {
+    init(colors: ColorPalette, cloudTheme: TelegramTheme?, search: SearchTheme, chatList: TelegramChatListTheme, tabBar: TelegramTabBarTheme, icons: TelegramIconsTheme, bubbled: Bool, fontSize: CGFloat, wallpaper: ThemeWallpaper, generated: Bool = false, emoticonThemes: [(String, TelegramPresentationTheme)] = [], backgroundSize: NSSize = NSMakeSize(1040, 1580)) {
         self.chatList = chatList
         #if !SHARE
             self.chat = TelegramChatColors(colors, bubbled)
         #endif
+        self.backgroundSize = backgroundSize
         self.tabBar = tabBar
         self.icons = icons
         self.wallpaper = wallpaper
@@ -2046,18 +2047,18 @@ class TelegramPresentationTheme : PresentationTheme {
     }
     
     func withUpdatedColors(_ colors: ColorPalette) -> TelegramPresentationTheme {
-        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: self.bubbled), bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes)
+        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: self.bubbled), bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes, backgroundSize: self.backgroundSize)
     }
     
     func withUpdatedEmoticonThemes(_ emoticonThemes: [(String, TelegramPresentationTheme)]) -> TelegramPresentationTheme {
-        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: self.icons, bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: emoticonThemes)
+        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: self.icons, bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: emoticonThemes, backgroundSize: self.backgroundSize)
     }
     
     func withUpdatedChatMode(_ bubbled: Bool) -> TelegramPresentationTheme {
-        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: bubbled), bubbled: bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes)
+        return TelegramPresentationTheme(colors: colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: bubbled), bubbled: bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes, backgroundSize: self.backgroundSize)
     }
     func new() -> TelegramPresentationTheme {
-        return TelegramPresentationTheme(colors: self.colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: self.icons, bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes)
+        return TelegramPresentationTheme(colors: self.colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: self.icons, bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: self.wallpaper, emoticonThemes: self.emoticonThemes, backgroundSize: self.backgroundSize)
     }
 
     
@@ -2067,7 +2068,7 @@ class TelegramPresentationTheme : PresentationTheme {
     }
     
     func withUpdatedWallpaper(_ wallpaper: ThemeWallpaper) -> TelegramPresentationTheme {
-        return TelegramPresentationTheme(colors: self.colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: self.bubbled), bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: wallpaper, emoticonThemes: self.emoticonThemes)
+        return TelegramPresentationTheme(colors: self.colors, cloudTheme: self.cloudTheme, search: self.search, chatList: self.chatList, tabBar: self.tabBar, icons: generateIcons(from: colors, bubbled: self.bubbled), bubbled: self.bubbled, fontSize: self.fontSize, wallpaper: wallpaper, emoticonThemes: self.emoticonThemes, backgroundSize: self.backgroundSize)
     }
     
     func activity(key:Int32, foregroundColor: NSColor, backgroundColor: NSColor) -> ActivitiesTheme {
@@ -2886,11 +2887,14 @@ private func generateIcons(from palette: ColorPalette, bubbled: Bool) -> Telegra
                               channel_feature_name_color: { NSImage(named: "Icon_ChannelFeature_NameColor")!.precomposed(palette.accent) },
                               channel_feature_reaction: { NSImage(named: "Icon_ChannelFeature_Reaction")!.precomposed(palette.accent) },
                               channel_feature_status: { NSImage(named: "Icon_ChannelFeature_Status")!.precomposed(palette.accent) },
-                              channel_feature_stories: { NSImage(named: "Icon_ChannelFeature_Stories")!.precomposed(palette.accent) }
+                              channel_feature_stories: { NSImage(named: "Icon_ChannelFeature_Stories")!.precomposed(palette.accent) },
+                              chat_hidden_author: { NSImage(named: "Icon_AuthorHidden")!.precomposed(.white) },
+                              chat_my_notes: { NSImage(named: "Icon_MyNotes")!.precomposed(.white) },
+                              premium_required_forward: { NSImage(named: "Icon_PremiumRequired_Forward")!.precomposed() }
 
     )
 }
-func generateTheme(palette: ColorPalette, cloudTheme: TelegramTheme?, bubbled: Bool, fontSize: CGFloat, wallpaper: ThemeWallpaper) -> TelegramPresentationTheme {
+func generateTheme(palette: ColorPalette, cloudTheme: TelegramTheme?, bubbled: Bool, fontSize: CGFloat, wallpaper: ThemeWallpaper, backgroundSize: NSSize = NSMakeSize(1040, 1580)) -> TelegramPresentationTheme {
     
     let chatList = TelegramChatListTheme(selectedBackgroundColor: palette.accentSelect,
                                          singleLayoutSelectedBackgroundColor: palette.grayBackground,
@@ -2913,7 +2917,7 @@ func generateTheme(palette: ColorPalette, cloudTheme: TelegramTheme?, bubbled: B
                                          badgeMutedBackgroundColor: palette.badgeMuted)
     
     let tabBar = TelegramTabBarTheme(color: palette.grayIcon, selectedColor: palette.accentIcon, badgeTextColor: .white, badgeColor: palette.redUI)
-    return TelegramPresentationTheme(colors: palette, cloudTheme: cloudTheme, search: SearchTheme(palette.grayBackground, #imageLiteral(resourceName: "Icon_SearchField").precomposed(palette.grayIcon), #imageLiteral(resourceName: "Icon_SearchClear").precomposed(palette.grayIcon), { strings().searchFieldSearch }, palette.text, palette.grayText), chatList: chatList, tabBar: tabBar, icons: generateIcons(from: palette, bubbled: bubbled), bubbled: bubbled, fontSize: fontSize, wallpaper: wallpaper, generated: true)
+    return TelegramPresentationTheme(colors: palette, cloudTheme: cloudTheme, search: SearchTheme(palette.grayBackground, #imageLiteral(resourceName: "Icon_SearchField").precomposed(palette.grayIcon), #imageLiteral(resourceName: "Icon_SearchClear").precomposed(palette.grayIcon), { strings().searchFieldSearch }, palette.text, palette.grayText), chatList: chatList, tabBar: tabBar, icons: generateIcons(from: palette, bubbled: bubbled), bubbled: bubbled, fontSize: fontSize, wallpaper: wallpaper, generated: true, backgroundSize: backgroundSize)
 }
 
 

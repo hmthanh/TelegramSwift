@@ -149,8 +149,8 @@ public class UpdateTransition<T> {
 public struct TableSearchVisibleData {
     let cancelImage: CGImage?
     let cancel:()->Void
-    let updateState: (SearchState)->Void
-    public init(cancelImage: CGImage? = nil, cancel: @escaping()->Void, updateState: @escaping(SearchState)->Void) {
+    let updateState: (SearchState?)->Void
+    public init(cancelImage: CGImage? = nil, cancel: @escaping()->Void, updateState: @escaping(SearchState?)->Void) {
         self.cancelImage = cancelImage
         self.cancel = cancel
         self.updateState = updateState
@@ -158,7 +158,7 @@ public struct TableSearchVisibleData {
 }
 
 public enum TableSearchViewState : Equatable {
-    case none((SearchState)->Void)
+    case none((SearchState?)->Void)
     case visible(TableSearchVisibleData)
     
     public static func ==(lhs: TableSearchViewState, rhs: TableSearchViewState) -> Bool {
@@ -1976,8 +1976,9 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                 transition.updateFrame(view: view, frame: rect)
                 NSAnimationContext.current.duration = animated ? duration : 0.0
                 NSAnimationContext.current.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.tableView.beginUpdates()
                 self.tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
-
+                self.tableView.endUpdates()
                 
                 return
             }
@@ -2603,6 +2604,8 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
 //    private var awaitingTransitions: [TableUpdateTransition] = []
     
     private var processedIds: Set<Int64> = Set()
+    private var firstSearchAppear = true
+    private var currentSearchState: SearchState?
     
     private func enqueueAwaitingIfNeeded() {
 //        while !awaitingTransitions.isEmpty && !self.clipView.isAnimateScrolling {
@@ -2897,9 +2900,14 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                 }, { state in
                     updateState(state)
                 })
+                updateState(nil)
+                firstSearchAppear = true
             case let .visible(data):
                 searchView.change(pos: NSZeroPoint, animated: true)
-                searchView.applySearchResponder()
+                if firstSearchAppear {
+                    searchView.applySearchResponder()
+                }
+                firstSearchAppear = false
                 searchView.updateDatas(data)
                 
                 searchView.searchView.searchInteractions = SearchInteractions({ state, _ in
@@ -2907,6 +2915,13 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                 }, { state in
                     data.updateState(state)
                 })
+                
+                let searchState: SearchState = .init(state: searchView.searchView.state, request: searchView.searchView.query)
+                
+                if searchState != self.currentSearchState {
+                    self.currentSearchState = searchState
+                    data.updateState(searchState)
+                }
             }
         } else {
             self.searchView?.removeFromSuperview()

@@ -10,7 +10,7 @@ import Cocoa
 import TGUIKit
 import Postbox
 import TelegramCore
-
+import TelegramMedia
 import SwiftSignalKit
 import AVFoundation
 
@@ -219,12 +219,8 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         }
     }
     
-    private struct Counters : Equatable {
-        var replies: Int32?
-        var online: Int32?
-    }
-    
-    private var counters: Counters = Counters() {
+
+    private var counters: ChatTitleCounters = ChatTitleCounters() {
         didSet {
             if oldValue != counters {
                 updateTitle(presentation: chatInteraction.presentation)
@@ -262,75 +258,9 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         } else {
             updateStatus(presentation: chatInteraction.presentation)
         }
-        
-        if oldValue == nil {
-            let answersCount: Signal<Int32?, NoError>
-            let onlineMemberCount:Signal<Int32?, NoError>
-
-            let peerId = chatInteraction.peerId
-            let threadId = chatInteraction.mode.threadId64
-            let isThread = chatInteraction.mode.isThreadMode
-            
-            if let threadId = threadId {
-                switch chatInteraction.mode {
-                case let .thread(data, _):
-                    if isThread {
-                        answersCount = context.account.postbox.messageView(data.messageId)
-                            |> map {
-                                $0.message?.attributes.compactMap { $0 as? ReplyThreadMessageAttribute }.first
-                            }
-                            |> map {
-                                $0?.count
-                            }
-                            |> deliverOnMainQueue
-                    } else {
-                        let countViewKey: PostboxViewKey = .historyTagSummaryView(tag: MessageTags(), peerId: peerId, threadId: threadId, namespace: Namespaces.Message.Cloud)
-                        let localCountViewKey: PostboxViewKey = .historyTagSummaryView(tag: MessageTags(), peerId: peerId, threadId: threadId, namespace: Namespaces.Message.Local)
-                        
-                        answersCount = context.account.postbox.combinedView(keys: [countViewKey, localCountViewKey])
-                        |> map { views -> Int32 in
-                            var messageCount = 0
-                            if let summaryView = views.views[countViewKey] as? MessageHistoryTagSummaryView, let count = summaryView.count {
-                                if threadId == 1 {
-                                    messageCount += Int(count)
-                                } else {
-                                    messageCount += max(Int(count) - 1, 0)
-                                }
-                            }
-                            if let summaryView = views.views[localCountViewKey] as? MessageHistoryTagSummaryView, let count = summaryView.count {
-                                messageCount += Int(count)
-                            }
-                            return Int32(messageCount)
-                        } |> map(Optional.init) |> deliverOnMainQueue
-                    }
-                default:
-                    answersCount = .single(nil)
-                }
-            } else {
-                answersCount = .single(nil)
-            }
-            if let peerView = peerView, let peer = peerViewMainPeer(peerView), peer.isSupergroup || peer.isGigagroup {
-                if let cachedData = peerView.cachedData as? CachedChannelData {
-                    if (cachedData.participantsSummary.memberCount ?? 0) > 200 {
-                        onlineMemberCount = context.peerChannelMemberCategoriesContextsManager.recentOnline(peerId: self.chatInteraction.peerId)  |> map(Optional.init) |> deliverOnMainQueue
-                    } else {
-                        onlineMemberCount = context.peerChannelMemberCategoriesContextsManager.recentOnlineSmall(peerId: self.chatInteraction.peerId)  |> map(Optional.init) |> deliverOnMainQueue
-                    }
-
-                } else {
-                    onlineMemberCount = .single(nil)
-                }
-            } else {
-                onlineMemberCount = .single(nil)
-            }
-            
-            self.counterDisposable.set(combineLatest(queue: .mainQueue(), onlineMemberCount, answersCount).start(next: { [weak self] online, answers in
-                let counters = Counters(replies: answers, online: online)
-                self?.counters = counters
-            }))
-        }
     }
-    func update(_ peerView: PeerView?, story: PeerExpiringStoryListContext.State?, animated: Bool) {
+    func update(_ peerView: PeerView?, story: PeerExpiringStoryListContext.State?, counters: ChatTitleCounters, animated: Bool) {
+        self.counters = counters
         self.updatePeerView(peerView, animated: animated)
         self.updateStoryState(story, animated: animated)
     }
@@ -412,7 +342,9 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         addSubview(activities.view!)
         
         searchButton.set(handler: { [weak self] _ in
-            self?.chatInteraction.update({$0.updatedSearchMode((!$0.isSearchMode.0, nil, nil))})
+            self?.chatInteraction.update { current in
+                current.updatedSearchMode(.init(inSearch: !current.searchMode.inSearch))
+            }
         }, for: .Click)
         
         addSubview(searchButton)
@@ -527,8 +459,6 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
     }
     
     
-    private let counterDisposable = MetaDisposable()
-
 
     private var currentPhoto: TelegramPeerPhoto?
     
@@ -567,6 +497,8 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                 }
             } else if chatInteraction.mode.isTopicMode {
                 chatInteraction.openInfo(chatInteraction.peerId, false, nil, nil)
+            } else if chatInteraction.mode.isSavedMessagesThread, let threadId = chatInteraction.mode.threadId64 {
+                chatInteraction.openInfo(PeerId(threadId), false, nil, nil)
             }
         }
         
@@ -583,7 +515,6 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
     
     deinit {
         disposable.dispose()
-        counterDisposable.dispose()
         NotificationCenter.default.removeObserver(self)
     }
     
@@ -749,6 +680,12 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                 if peer.id == repliesPeerId {
                     let icon = theme.icons.chat_replies_avatar
                     avatarControl.setSignal(generateEmptyPhoto(avatarControl.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(avatarControl.frame.size.width - 17, avatarControl.frame.size.height - 17)), cornerRadius: nil)) |> map {($0, false)})
+                } else if peer.id.isAnonymousSavedMessages {
+                    let icon = theme.icons.chat_hidden_author
+                    avatarControl.setSignal(generateEmptyPhoto(avatarControl.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(avatarControl.frame.size.width - 5, avatarControl.frame.size.height - 5)), cornerRadius: nil)) |> map {($0, false)})
+                } else if peer.id == chatInteraction.context.peerId, chatInteraction.mode.isSavedMessagesThread {
+                    let icon = theme.icons.chat_my_notes
+                    avatarControl.setSignal(generateEmptyPhoto(avatarControl.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(avatarControl.frame.size.width - 5, avatarControl.frame.size.height - 5)), cornerRadius: nil)) |> map {($0, false)})
                 } else if peer.id == chatInteraction.context.peerId {
                     let icon = theme.icons.searchSaved
                     avatarControl.setSignal(generateEmptyPhoto(avatarControl.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(avatarControl.frame.size.width - 15, avatarControl.frame.size.height - 15)), cornerRadius: nil)) |> map {($0, false)})
@@ -761,12 +698,12 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                 titleImage = (theme.icons.chatSecretTitle, .left(topInset: 0))
                 callButton.set(image: theme.icons.chatCall, for: .Normal)
                 callButton.set(image: theme.icons.chatCallActive, for: .Highlight)
-            } else if let peer = peerViewMainPeer(peerView), chatInteraction.mode == .history {
+            } else if let peer = peerViewMainPeer(peerView), chatInteraction.mode == .history || chatInteraction.mode.isSavedMessagesThread {
                 titleImage = nil
                 
                 let context = chatInteraction.context
                 
-                if chatInteraction.context.peerId != chatInteraction.peerId, presentation.reportMode == nil {
+                if chatInteraction.context.peerId != chatInteraction.peerId || chatInteraction.mode.isSavedMessagesThread, presentation.reportMode == nil {
                     statusControl = PremiumStatusControl.control(peer, account: context.account, inlinePacksContext: context.inlinePacksContext, isSelected: false, cached: self.statusControl, animated: false)
                 }
                 
@@ -833,25 +770,18 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
     
     private func updateTitle(_ force: Bool = false, presentation: ChatPresentationInterfaceState) {
         if let peerView = self.peerView, let peer = peerViewMainPeer(peerView) {
-            var result = stringStatus(for: peerView, context: chatInteraction.context, theme: PeerStatusStringTheme(titleFont: .medium(.title)), onlineMemberCount: self.counters.online)
+            var result = stringStatus(for: peerView, context: chatInteraction.context, theme: PeerStatusStringTheme(titleFont: .medium(.title)), onlineMemberCount: self.counters.online, ignoreActivity: chatInteraction.mode.isSavedMessagesThread)
             
             if chatInteraction.mode == .pinned {
-                result = result.withUpdatedTitle(strings().chatTitlePinnedMessagesCountable(presentation.pinnedMessageId?.totalCount ?? 0))
-                status = nil
-            } else if chatInteraction.context.peerId == peerView.peerId  {
-                if chatInteraction.mode == .scheduled {
-                    result = result.withUpdatedTitle(strings().chatTitleReminder)
-                } else {
-                    result = result.withUpdatedTitle(strings().peerSavedMessages)
-                }
+                result = result.withUpdatedTitle(strings().chatTitlePinnedMessagesCountable(presentation.pinnedMessageId?.totalCount ?? 0)).withUpdatedStatus("")
             } else if chatInteraction.mode == .scheduled {
                 result = result.withUpdatedTitle(strings().chatTitleScheduledMessages)
-            } else if case .thread(_, let mode) = chatInteraction.mode {
+            } else if case let .thread(data, mode) = chatInteraction.mode {
                 switch mode {
                 case .comments:
-                    result = result.withUpdatedTitle(strings().chatTitleCommentsCountable(Int(self.counters.replies ?? 0)))
+                    result = result.withUpdatedTitle(strings().chatTitleDiscussion).withUpdatedStatus(strings().chatTitleCommentsCountable(Int(self.counters.replies ?? 0)))
                 case .replies:
-                    result = result.withUpdatedTitle(strings().chatTitleRepliesCountable(Int(self.counters.replies ?? 0)))
+                    result = result.withUpdatedTitle(strings().chatTitleDiscussion).withUpdatedStatus(strings().chatTitleRepliesCountable(Int(self.counters.replies ?? 0)))
                 case .topic:
                     if let count = self.counters.replies, count > 0 {
                         result = result
@@ -862,20 +792,32 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                             .withUpdatedTitle(presentation.threadInfo?.info.title ?? "")
                             .withUpdatedStatus(strings().peerInfoTopicStatusIn(peer.displayTitle))
                     }
-                }
-                switch mode {
-                case .topic:
+                case .savedMessages:
+                    if let count = self.counters.replies, count > 0 {
+                        result = result
+                            .withUpdatedStatus(strings().chatTitleTopicCountable(Int(count)))
+                    } else {
+                        result = result
+                            .withUpdatedTitle(presentation.threadInfo?.info.title ?? "")
+                            .withUpdatedStatus(strings().peerInfoTopicStatusIn(peer.displayTitle))
+                    }
+                    if PeerId(data.threadId) == chatInteraction.context.peerId {
+                        result = result.withUpdatedTitle(strings().peerMyNotes)
+                    }
+                case .saved:
                     break
-                default:
-                    status = .initialize(string: result.title.string, color: theme.colors.grayText, font: .normal(12))
-                    result = result.withUpdatedTitle(strings().chatTitleDiscussion)
+                }
+ 
+            } else if chatInteraction.context.peerId == peerView.peerId  {
+                if chatInteraction.mode == .scheduled {
+                    result = result.withUpdatedTitle(strings().chatTitleReminder).withUpdatedStatus("")
+                } else {
+                    result = result.withUpdatedTitle(strings().peerSavedMessages).withUpdatedStatus("")
                 }
             }
             
-            if chatInteraction.context.peerId == peerView.peerId {
-                status = nil
-            } else if (status == nil || !status!.isEqual(to: result.status) || force) && chatInteraction.mode != .scheduled && !chatInteraction.mode.isThreadMode && chatInteraction.mode != .pinned {
-                status = result.status
+            if (status == nil || !status!.isEqual(to: result.status) || force) {
+                status = result.status.string.isEmpty ? nil : result.status
             }
             switch connectionStatus {
             case let .connecting(proxy, _):

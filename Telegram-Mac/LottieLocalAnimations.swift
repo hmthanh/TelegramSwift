@@ -8,7 +8,7 @@
 
 import Cocoa
 import TelegramCore
-
+import TelegramMedia
 import Postbox
 
 enum LocalAnimatedSticker : String {
@@ -126,6 +126,10 @@ enum LocalAnimatedSticker : String {
     case premium_gift_6
     case premium_gift_3
     
+    case single_voice_fire
+    
+    case show_status_profile
+    case show_status_read
     
     case menu_add_to_folder
     case menu_archive
@@ -303,7 +307,13 @@ enum LocalAnimatedSticker : String {
     case emoji_category_what
     case emoji_category_work
     
+    case menu_tag_filter
+    case menu_tag_remove
+    case menu_tag_rename
     
+    case menu_hd
+    case menu_hd_lock
+    case menu_sd
     
     case forum_topic
     
@@ -415,6 +425,10 @@ enum LocalAnimatedSticker : String {
         case .premium_gift_6:
             playPolicy = .onceEnd
         case .premium_gift_12:
+            playPolicy = .onceEnd
+        case .show_status_read:
+            playPolicy = .onceEnd
+        case .show_status_profile:
             playPolicy = .onceEnd
         default:
             playPolicy = .loop

@@ -118,9 +118,9 @@ struct PeerListState : Equatable {
     var filterData: FilterData
     var presentation: TelegramPresentationTheme
     var privacy: GlobalPrivacySettings?
-
+    var displaySavedAsTopics: Bool
     var hasStories: Bool {
-        if let stories = self.stories, !isContacts, !mode.isForum {
+        if let stories = self.stories, !isContacts, !mode.isForumLike {
             if self.splitState == .minimisize {
                 return false
             }
@@ -135,7 +135,7 @@ struct PeerListState : Equatable {
     }
     
     static func initialize(_ isContacts: Bool) -> PeerListState {
-        return .init(proxySettings: .defaultSettings, connectionStatus: .waitingForNetwork, splitState: .dual, searchState: .None, peer: nil, forumPeer: nil, mode: .plain, activities: .init(activities: [:]), appear: .normal, controllerAppear: .normal, hiddenItems: .default, selectedForum: nil, stories: nil, isContacts: isContacts, filterData: FilterData(), presentation: theme, privacy: nil)
+        return .init(proxySettings: .defaultSettings, connectionStatus: .waitingForNetwork, splitState: .dual, searchState: .None, peer: nil, forumPeer: nil, mode: .plain, activities: .init(activities: [:]), appear: .normal, controllerAppear: .normal, hiddenItems: .default, selectedForum: nil, stories: nil, isContacts: isContacts, filterData: FilterData(), presentation: theme, privacy: nil, displaySavedAsTopics: false)
 
     }
 }
@@ -394,6 +394,7 @@ fileprivate final class TitleView : Control {
         case forum
         case chats
         case archivedChats
+        case savedMessages
         var text: String {
             switch self {
             case .contacts:
@@ -404,6 +405,8 @@ fileprivate final class TitleView : Control {
                 return strings().peerListTitleArchive
             case .forum:
                 return strings().peerListTitleForum
+            case .savedMessages:
+                return strings().peerListTitleSavedMessages
             }
         }
     }
@@ -428,7 +431,9 @@ fileprivate final class TitleView : Control {
     fileprivate func updateState(_ state: PeerListState, arguments: Arguments, maxWidth: CGFloat, animated: Bool) {
                 
         let source: Source
-        if state.isContacts {
+        if state.mode.isSavedMessages {
+            source = .savedMessages
+        } else if state.isContacts {
             source = .contacts
         } else if state.mode.groupId == .archive {
             source = .archivedChats
@@ -726,7 +731,7 @@ class PeerListContainerView : Control {
         }
 
         
-        let hasCompose = (state.isContacts || state.mode == .plain || (state.mode.groupId == .archive && state.splitState != .minimisize))
+        let hasCompose = (state.isContacts || state.mode.isSavedMessages || state.mode == .plain || (state.mode.groupId == .archive && state.splitState != .minimisize))
         
         if hasCompose {
             let current: ImageButton
@@ -745,7 +750,7 @@ class PeerListContainerView : Control {
                 current.set(image: theme.icons.contactsNewContact, for: .Normal)
                 current.set(image: theme.icons.contactsNewContact, for: .Hover)
                 current.set(image: theme.icons.contactsNewContact, for: .Highlight)
-            } else if state.mode.groupId == .archive {
+            } else if state.mode.groupId == .archive || state.mode.isSavedMessages {
                 current.set(background: .clear, for: .Highlight)
                 current.set(image: theme.icons.chatActions, for: .Normal)
                 current.set(image: theme.icons.chatActions, for: .Hover)
@@ -862,7 +867,7 @@ class PeerListContainerView : Control {
             self.foldersView = nil
         }
         
-        if state.mode.groupId == .archive || (state.selectedForum != nil && state.splitState != .minimisize) || state.mode.isForum || state.appear == .short {
+        if state.mode.groupId == .archive || (state.selectedForum != nil && state.splitState != .minimisize) || state.mode.isForumLike  || state.appear == .short {
             let current: ImageButton
             if let view = self.backButton {
                 current = view
@@ -950,7 +955,7 @@ class PeerListContainerView : Control {
                     
                     var items: [ContextMenuItem] = []
 
-                    if state.forumPeer == nil {
+                    if state.forumPeer == nil, !state.mode.isForumLike {
                         items.append(ContextMenuItem(strings().chatListDownloadsTag, handler: { [weak self] in
                             updateSearchTags(SearchTags(messageTags: nil, peerTag: nil))
                             self?.showDownloads?()
@@ -1233,7 +1238,7 @@ class PeerListContainerView : Control {
             } else {
                 let rect = NSMakeRect(10, 10, 40, searchRect.height)
                 transition.updateFrame(view: view, frame: rect)
-                if state.mode.groupId == .archive {
+                if state.mode.groupId == .archive || state.mode.isSavedMessages {
                     transition.updateAlpha(view: view, alpha: 1)
                 } else {
                     transition.updateAlpha(view: view, alpha: 1 - progress)
@@ -1410,11 +1415,24 @@ enum PeerListMode : Equatable {
     case folder(EngineChatList.Group)
     case filter(Int32)
     case forum(PeerId, Bool, Bool)
+    case savedMessagesChats
+    
+    var isForumLike: Bool {
+        switch self {
+        case .forum, .savedMessagesChats:
+            return true
+        default:
+            return false
+        }
+    }
+    
     var isPlain:Bool {
         switch self {
         case .plain:
             return true
         case .forum:
+            return true
+        case .savedMessagesChats:
             return true
         default:
             if self.groupId == .archive {
@@ -1440,6 +1458,14 @@ enum PeerListMode : Equatable {
             return nil
         }
     }
+    var isSavedMessages: Bool {
+        switch self {
+        case .savedMessagesChats:
+            return true
+        default:
+            return false
+        }
+    }
     var isForum: Bool {
         switch self {
         case .forum:
@@ -1458,6 +1484,8 @@ enum PeerListMode : Equatable {
             return .forum(peerId: peerId)
         case let .filter(filterId):
             return .chatList(groupId: .group(filterId))
+        case .savedMessagesChats:
+            return .savedMessagesChats
         }
     }
 }
@@ -1636,6 +1664,22 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
         let context = self.context
         let mode = self.mode
         let isContacts = self.isContacts
+        
+        
+        
+        switch mode {
+        case .savedMessagesChats:
+            let signal = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.DisplaySavedChatsAsTopics()) |> deliverOnMainQueue
+            actionsDisposable.add(signal.startStrict(next: { [weak self] value in
+                self?.updateState { current in
+                    var current = current
+                    current.displaySavedAsTopics = value
+                    return current
+                }
+            }))
+        default:
+            break
+        }
                 
         genericView.tableView._scrollDidEndLiveScrolling = { [weak self] in
             _ = self?.finishOverscroll()
@@ -2051,6 +2095,20 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
                 menu.addItem(ContextMenuItem(strings().newContactTitle, handler: {
                     showModal(with: AddContactModalController(context), for: context.window)
                 }, itemImage: MenuAnimation.menu_add_member.value))
+            } else if self?.state?.mode == .savedMessagesChats {
+                
+                let displayAsTopics = self?.state?.displaySavedAsTopics ?? false
+                
+                menu.addItem(ContextMenuItem(strings().chatSavedMessagesViewAsMessages, handler: {
+                    context.engine.peers.updateSavedMessagesViewAsTopics(value: false)
+                    self?.navigationController?.back()
+                    context.bindings.rootNavigation().push(ChatController(context: context, chatLocation: .peer(context.peerId)))
+                }, itemImage: !displayAsTopics ? MenuAnimation.menu_check_selected.value : nil))
+                
+                menu.addItem(ContextMenuItem(strings().chatSavedMessagesViewAsChats, handler: {
+                    context.engine.peers.updateSavedMessagesViewAsTopics(value: true)
+                    ForumUI.open(context.peerId, context: context)
+                }, itemImage: displayAsTopics ? MenuAnimation.menu_check_selected.value : nil))
             } else if self?.state?.mode.groupId == .archive {
                 menu.addItem(ContextMenuItem(strings().peerListArchiveSettings, handler: {
                     pushController(ArchiveSettingsController(context: context, privacy: self?.state?.privacy, update: { updated in
@@ -2228,15 +2286,22 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
                 var id: UIChatListEntryId
                 switch location {
                 case .peer:
-                    id = .chatId(.chatList(location.peerId), location.peerId, -1)
+                    switch self.mode {
+                    case .savedMessagesChats:
+                        id = .empty
+                    default:
+                        id = .chatId(.chatList(location.peerId), location.peerId, -1)
+                    }
                 case let .thread(data):
-                    let threadId = makeMessageThreadId(data.messageId)
+                    let threadId = data.threadId
                     
                     switch self.mode {
                     case .plain, .filter, .folder:
                         id = .forum(location.peerId)
                     case .forum:
                         id = .chatId(.forum(threadId), location.peerId, -1)
+                    case .savedMessagesChats:
+                        id = .chatId(.chatList(PeerId(data.threadId)), PeerId(data.threadId), -1)
                     }
                 }
                 if self.genericView.tableView.item(stableId: id) == nil {
@@ -2270,6 +2335,9 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
             if let peerId = self.state?.forumPeer?.peer.id, self.state?.appear == .short {
                 initialTags = .init(messageTags: nil, peerTag: nil)
                 target = .forum(peerId)
+            } else if mode == .savedMessagesChats {
+                initialTags = .init(messageTags: nil, peerTag: nil)
+                target = .savedMessages
             } else {
                 initialTags = .init(messageTags: nil, peerTag: nil)
                 target = .common(.root)
@@ -2395,7 +2463,7 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
         return .rejected
     }
     
-    func open(with entryId: UIChatListEntryId, messageId:MessageId? = nil, initialAction: ChatInitialAction? = nil, close:Bool = true, addition: Bool = false, forceAnimated: Bool = false, threadId: Int64? = nil) ->Void {
+    func open(with entryId: UIChatListEntryId, messageId:MessageId? = nil, initialAction: ChatInitialAction? = nil, close:Bool = true, addition: Bool = false, forceAnimated: Bool = false, threadId: Int64? = nil, openAsTopics: Bool = false) ->Void {
         
         let navigation = context.bindings.rootNavigation()
 
@@ -2415,33 +2483,39 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
             switch type {
             case let .chatList(peerId):
                 
-                if let modalAction = navigation.modalAction as? FWDNavigationAction, peerId == context.peerId {
-                    _ = Sender.forwardMessages(messageIds: modalAction.messages.map{$0.id}, context: context, peerId: context.peerId, replyId: nil).start()
-                    _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 1.0).start()
-                    modalAction.afterInvoke()
-                    navigation.removeModalAction()
+                if openAsTopics {
+                    ForumUI.open(peerId, context: context, threadId: threadId)
                 } else {
-                    if let current = navigation.controller as? ChatController, peerId == current.chatInteraction.peerId, let messageId = messageId, current.mode == .history {
-                        current.chatInteraction.focusMessageId(nil, .init(messageId: messageId, string: nil), .center(id: 0, innerId: nil, animated: false, focus: .init(focus: true), inset: 0))
+                    if let modalAction = navigation.modalAction as? FWDNavigationAction, peerId == context.peerId {
+                        _ = Sender.forwardMessages(messageIds: modalAction.messages.map{$0.id}, context: context, peerId: context.peerId, replyId: nil).start()
+                        _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 1.0).start()
+                        modalAction.afterInvoke()
+                        navigation.removeModalAction()
                     } else {
-                        let chatLocation: ChatLocation = .peer(peerId)
-                        let chat: ChatController
-                        if addition {
-                            chat = ChatAdditionController(context: context, chatLocation: chatLocation, focusTarget: .init(messageId: messageId))
+                        if mode.isSavedMessages {
+                            _ = ForumUI.openSavedMessages(peerId.toInt64(), context: context, messageId: messageId, initialAction: initialAction).start()
                         } else {
-                            chat = ChatController(context: self.context, chatLocation: chatLocation, focusTarget: .init(messageId: messageId), initialAction: initialAction)
+                            if let current = navigation.controller as? ChatController, peerId == current.chatInteraction.peerId, let messageId = messageId, current.mode == .history {
+                                current.chatInteraction.focusMessageId(nil, .init(messageId: messageId, string: nil), .center(id: 0, innerId: nil, animated: false, focus: .init(focus: true), inset: 0))
+                            } else {
+                                let chatLocation: ChatLocation = .peer(peerId)
+                                let chat: ChatController
+                                if addition {
+                                    chat = ChatAdditionController(context: context, chatLocation: chatLocation, focusTarget: .init(messageId: messageId))
+                                } else {
+                                    chat = ChatController(context: self.context, chatLocation: chatLocation, focusTarget: .init(messageId: messageId), initialAction: initialAction)
+                                }
+                                let animated = context.layout == .single || forceAnimated
+                                navigation.push(chat, context.layout == .single || forceAnimated, style: animated ? .push : ViewControllerStyle.none)
+                            }
                         }
-                        let animated = context.layout == .single || forceAnimated
-                        navigation.push(chat, context.layout == .single || forceAnimated, style: animated ? .push : ViewControllerStyle.none)
                     }
                 }
                 
                 if self.navigationController?.controller !== self {
                     switch entryId {
                     case let .chatId(_, pid, _):
-                        if pid != peerId {
-                            self.navigationController?.back()
-                        }
+                        self.navigationController?.back()
                     default:
                         break
                     }
@@ -2459,19 +2533,7 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
             } else {
                 ForumUI.open(peerId, context: context, threadId: threadId)
             }
-        case .systemDeprecated:
-            break
-        case .sharedFolderUpdated:
-            break
-        case .reveal:
-            break
-        case .empty:
-            break
-        case .loading:
-            break
-        case .space:
-            break
-        case .suspicious:
+        case .systemDeprecated, .sharedFolderUpdated, .reveal, .empty, .loading, .space, .suspicious, .savedMessageIndex:
             break
         }
         if close {
@@ -2603,7 +2665,7 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
     
     private func updateHighlight(_ peerId: PeerId?) -> Void {
         switch self.mode {
-        case .forum:
+        case .forum, .savedMessagesChats:
             break
         default:
             self.updateState { current in
@@ -2634,6 +2696,8 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
         switch mode {
         case .forum:
             context.globalForumId.set(nil)
+        case .savedMessagesChats:
+            context.globalForumId.set(nil)
         default:
             break
         }
@@ -2648,6 +2712,8 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
         switch mode {
         case let .forum(peerId, _, _):
             context.globalForumId.set(peerId)
+        case .savedMessagesChats:
+            context.globalForumId.set(context.peerId)
         default:
             break
         }
@@ -2791,11 +2857,14 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
                 autofinish = optimized >= StoryListChatListRowItem.InterfaceState.small
             }
             
+            let speed = calculateScrollSpeed(scrollPositions: scrollPositions)
+            
             if autofinish  {
                 initFromEvent = nil
                 scrollPositions = [-1000, 1000]
             }
             let progress: CGFloat = max(0.0, min(1.0 - optimized / StoryListChatListRowItem.InterfaceState.small, 1.0))
+            let animated = progress != 0
             if autofinish {
                 switch storyInterfaceState {
                 case let .progress(_, from, _):
@@ -2807,9 +2876,11 @@ class PeersListController: TelegramGenericViewController<PeerListContainerView>,
                         storyInterfaceState = .revealed
                     }
                     CATransaction.begin()
-                    self.genericView.tableView.reloadData(row: item.index, animated: true)
-                    self.genericView.updateLayout(frame.size, transition: .animated(duration: 0.2, curve: .easeOut))
+                    self.genericView.updateLayout(frame.size, transition: animated ? .animated(duration: 0.2, curve: .easeOut) : .immediate)
+                    
+                    self.genericView.tableView.reloadData(row: item.index, animated: animated)
                     CATransaction.commit()
+                    
                     return false
                 default:
                     return false

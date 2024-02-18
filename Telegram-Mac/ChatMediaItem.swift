@@ -14,6 +14,8 @@ import TGUIKit
 import SwiftSignalKit
 import TGModernGrowingTextView
 import InputView
+import TelegramMedia
+
 class ChatMediaLayoutParameters : Equatable {
     
     var showMedia:(Message)->Void = {_ in }
@@ -782,7 +784,7 @@ class ChatMediaView: ChatRowView, ModalPreviewRowViewProtocol {
     override func set(item:TableRowItem, animated:Bool = false) {
         super.set(item: item, animated: animated)
         if let item:ChatMediaItem = item as? ChatMediaItem {
-            if contentNode == nil || !contentNode!.isKind(of: item.contentNode())  {
+            if contentNode == nil || !contentNode!.isKind(of: item.contentNode()) || contentNode?.parent?.stableId != item.message?.stableId  {
                 if let view = self.contentNode {
                     performSubviewRemoval(view, animated: animated)
                 }

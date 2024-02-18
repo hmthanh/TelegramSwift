@@ -338,7 +338,7 @@ class ChatRowItem: TableRowItem {
             }
         }
         
-        if let reactions = self.reactionsLayout, reactions.mode == .full {
+        if let reactions = self.reactionsLayout {
             height += defaultReactionsInset
             height += reactions.size.height
         }
@@ -866,6 +866,10 @@ class ChatRowItem: TableRowItem {
     
     var canReact: Bool {
         if let message = firstMessage {
+            
+            if chatInteraction.isPeerSavedMessages {
+                return false
+            }
             if message.id.namespace != Namespaces.Message.Cloud {
                 return false
             }
@@ -905,6 +909,9 @@ class ChatRowItem: TableRowItem {
         if let peer = peer {
             peers.append(peer)
         }
+        if let peer = message?.author {
+            peers.append(peer)
+        }
         
         guard let message = message else {
             return false
@@ -934,7 +941,7 @@ class ChatRowItem: TableRowItem {
         }
         
         for peer in peers {
-            if peer.addressName == "reviews_bot" {
+            if peer.addressName == "reviews_bot" || peer.addressName == "ReviewInsightsBot" {
                 return true
             }
             if let peer = peer as? TelegramChannel {
@@ -988,7 +995,9 @@ class ChatRowItem: TableRowItem {
     let isIncoming: Bool
     
     var canHasFloatingPhoto: Bool {
-        if chatInteraction.mode.isThreadMode, chatInteraction.mode.threadId == message?.id {
+        if chatInteraction.mode.isSavedMode {
+            return false
+        } else if chatInteraction.mode.isThreadMode, chatInteraction.mode.threadId == message?.id {
             return false
         } else {
             return isIncoming && self.hasPhoto
@@ -1205,6 +1214,8 @@ class ChatRowItem: TableRowItem {
         if self.renderType != .bubble {
             return true
         } else if chatInteraction.isLogInteraction {
+            return true
+        } else if chatInteraction.mode.isSavedMode {
             return true
         }
         return false
@@ -1534,17 +1545,32 @@ class ChatRowItem: TableRowItem {
             if chatInteraction.isLogInteraction {
                 return nil
             }
+            if chatInteraction.isPeerSavedMessages {
+                return nil
+            }
             if unsupported {
                 return nil
             }
-            let reactions = message.effectiveReactions(context.peerId)
+            let reactions = message.effectiveReactions(context.peerId, isTags: context.peerId == chatInteraction.peerId)
+            let currentTag: MessageReaction.Reaction?
+            if case let .customTag(buffer, _) = chatInteraction.presentation.searchMode.tag {
+                currentTag = ReactionsMessageAttribute.reactionFromMessageTag(tag: buffer)
+            } else {
+                currentTag = nil
+            }
             let context = self.context
             let chatInteraction = self.chatInteraction
             if let reactions = reactions, !reactions.reactions.isEmpty, let available = context.reactions.available {
-                let layout = ChatReactionsLayout(context: chatInteraction.context, message: message, available: available, peerAllowed: chatInteraction.presentation.allowedReactions, engine: chatInteraction.context.reactions, theme: presentation, renderType: renderType, isIncoming: isIncoming, isOutOfBounds: isBubbleFullFilled && self.captionLayouts.isEmpty, hasWallpaper: presentation.hasWallpaper, stateOverlayTextColor: isStateOverlayLayout ? stateOverlayTextColor : (!hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, entry.renderType == .bubble)), openInfo: { peerId in
+                let layout = ChatReactionsLayout(context: chatInteraction.context, message: message, available: available, peerAllowed: chatInteraction.presentation.allowedReactions, savedMessageTags: entry.additionalData.savedMessageTags, engine: chatInteraction.context.reactions, theme: presentation, renderType: renderType, currentTag: currentTag, isIncoming: isIncoming, isOutOfBounds: isBubbleFullFilled && self.captionLayouts.isEmpty, hasWallpaper: presentation.hasWallpaper, stateOverlayTextColor: isStateOverlayLayout ? stateOverlayTextColor : (!hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, entry.renderType == .bubble)), openInfo: { peerId in
                     PeerInfoController.push(navigation: context.bindings.rootNavigation(), context: context, peerId: peerId, source: .reaction(message.id))
                 }, runEffect: { [weak chatInteraction] value in
                     chatInteraction?.runReactionEffect(value, message.id)
+                }, tagAction: { [weak chatInteraction] reaction in
+                    if !context.isPremium {
+                        showModal(with: PremiumBoardingController(context: context, source: .saved_tags, openFeatures: true), for: context.window)
+                    } else {
+                        chatInteraction?.setLocationTag(.customTag(ReactionsMessageAttribute.messageTag(reaction: reaction), nil))
+                    }
                 })
                 
                 _reactionsLayout = layout
@@ -1946,6 +1972,9 @@ class ChatRowItem: TableRowItem {
 
                             if range.location != NSNotFound {
                                 attr.addAttribute(.link, value: link, range: range)
+                                if message.forwardInfo?.author != nil || message.forwardInfo == nil {
+                                    attr.addAttribute(.font, value: NSFont.bold(.short), range: range)
+                                }
                             }
                         } else {
                             let newAttr = NSAttributedString.initialize(string: text, color: forwardNameColor, font: .normal(.short))
@@ -2180,20 +2209,24 @@ class ChatRowItem: TableRowItem {
             let replyPresentation = ChatAccessoryPresentation(background: hasBubble ? theme.chat.backgroundColor(isIncoming, object.renderType == .bubble) : isBubbled ?  theme.colors.grayForeground : theme.colors.background, colors: theme.chat.replyTitle(self), enabledText: theme.chat.replyText(self), disabledText: theme.chat.replyDisabledText(self), quoteIcon: theme.chat.replyQuote(self), pattern: theme.chat.replyPattern(self), app: theme)
 
             for attribute in message.attributes {
-                if let attribute = attribute as? ReplyMessageAttribute, threadId != attribute.messageId, let replyMessage = message.associatedMessages[attribute.messageId] {
+                if let attribute = attribute as? ReplyMessageAttribute, let replyMessage = message.associatedMessages[attribute.messageId] {
                     
                     var ignore: Bool = false
-                    if let threadId = message.effectiveReplyThreadMessageId, threadId == attribute.messageId, message.associatedThreadInfo != nil {
+                    if attribute.messageId == attribute.threadMessageId || attribute.messageId == threadId, chatInteraction.mode.isThreadMode || chatInteraction.mode.isTopicMode {
                         ignore = true
                     }
+                    
                     if message.media.first is TelegramMediaGiveawayResults {
                         ignore = true
                     }
                     if !ignore {
+                        
+                        let isQuote = attribute.isQuote
+                        
                         if replyMessage.isExpiredStory, let media = replyMessage.media.first as? TelegramMediaStory {
                             self.replyModel = ExpiredStoryReplyModel(message: message, storyId: media.storyId, bubbled: renderType == .bubble, context: context, presentation: replyPresentation)
                         } else {
-                            self.replyModel = ReplyModel(message: message, replyMessageId: attribute.messageId, context: context, replyMessage: replyMessage, quote: attribute.quote, autodownload: downloadSettings.isDownloable(replyMessage), presentation: replyPresentation, translate: entry.additionalData.replyTranslate)
+                            self.replyModel = ReplyModel(message: message, replyMessageId: attribute.messageId, context: context, replyMessage: replyMessage, quote: isQuote ? attribute.quote : nil, autodownload: downloadSettings.isDownloable(replyMessage), presentation: replyPresentation, translate: entry.additionalData.replyTranslate)
                         }
                         replyModel?.isSideAccessory = isBubbled && !hasBubble
                     }
@@ -2205,13 +2238,11 @@ class ChatRowItem: TableRowItem {
                     }
                 }
                 if let attribute = attribute as? QuotedReplyMessageAttribute, self.replyModel == nil {
-                    let replyMessage: Message?
-                    if let replyAttr = message.replyAttribute, let message = message.associatedMessages[replyAttr.messageId] {
-                        replyMessage = message
-                    } else {
-                        replyMessage = nil
+                    if let attr = message.replyAttribute, message.associatedMessages[attr.messageId] == nil {
+                        self.replyModel = ReplyModel(message: message, replyMessageId: message.id, context: context, replyMessage: message, quote: attribute.quote, presentation: replyPresentation, customHeader: attribute.authorName)
+                    } else if message.replyAttribute == nil {
+                        self.replyModel = ReplyModel(message: message, replyMessageId: message.id, context: context, replyMessage: message, quote: attribute.quote, presentation: replyPresentation, customHeader: attribute.authorName)
                     }
-                    self.replyModel = ReplyModel(message: message, replyMessageId: message.id, context: context, replyMessage: replyMessage ?? message, quote: attribute.quote, presentation: replyPresentation, customHeader: attribute.authorName)
                 }
                 if let attribute = attribute as? ViewCountMessageAttribute {
                     let attr: NSAttributedString = .initialize(string: max(1, attribute.count).prettyNumber, color: isStateOverlayLayout ? stateOverlayTextColor : !hasBubble ? theme.colors.grayText : theme.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
@@ -2333,7 +2364,9 @@ class ChatRowItem: TableRowItem {
                 return ChatMessageItem(initialSize, interaction, interaction.context, entry, downloadSettings, theme: theme)
             } else {
                 if message.id.peerId.namespace != Namespaces.Peer.SecretChat, message.autoclearTimeout != nil {
-                    return ChatServiceItem(initialSize, interaction,interaction.context, entry, downloadSettings, theme: theme)
+                    if let media = message.media.first, media is TelegramMediaImage || (media.isVideoFile && !media.isInstantVideo) {
+                        return ChatServiceItem(initialSize, interaction,interaction.context, entry, downloadSettings, theme: theme)
+                    }
                 }
                 if message.media.first is TelegramMediaGiveawayResults {
                     return ChatGiveawayResultRowItem(initialSize, interaction, interaction.context, entry, downloadSettings, theme: theme)
@@ -2446,15 +2479,7 @@ class ChatRowItem: TableRowItem {
         channelViews?.measure(width: hasBubble ? 60 : max(150,width - contentOffset.x - 44 - 150))
         replyCount?.measure(width: hasBubble ? 60 : max(150,width - contentOffset.x - 44 - 150))
        
-        if let reactions = reactionsLayout {
-            switch reactions.mode {
-            case .short:
-                reactions.measure(for: .greatestFiniteMagnitude)
-            default:
-                break
-            }
-        }
-        
+       
         self.rightFrames = ChatRightView.Frames(self, size: NSMakeSize(.greatestFiniteMagnitude, rightHeight))
         
         var widthForContent: CGFloat = blockWidth
@@ -2476,27 +2501,22 @@ class ChatRowItem: TableRowItem {
         }
         
         if let reactions = reactionsLayout {
-            switch reactions.mode {
-            case .full:
-                if isBubbled {
-                    if !hasBubble {
-                        reactions.measure(for: min(320, blockWidth))
-                    } else if reactions.presentation.isOutOfBounds {
-                        reactions.measure(for: _contentSize.width + 40)
-                    } else {
-                        var w = widthForContent
-                        if let item = self as? ChatMessageItem {
-                            if item.webpageLayout != nil {
-                                w = _contentSize.width
-                            }
-                        }
-                        reactions.measure(for: w)
-                    }
+            if isBubbled {
+                if !hasBubble {
+                    reactions.measure(for: min(320, blockWidth))
+                } else if reactions.presentation.isOutOfBounds {
+                    reactions.measure(for: _contentSize.width + 40)
                 } else {
-                    reactions.measure(for: max(_contentSize.width, widthForContent - rightSize.width))
+                    var w = widthForContent
+                    if let item = self as? ChatMessageItem {
+                        if item.webpageLayout != nil {
+                            w = _contentSize.width
+                        }
+                    }
+                    reactions.measure(for: w)
                 }
-            default:
-                break
+            } else {
+                reactions.measure(for: max(_contentSize.width, widthForContent - rightSize.width))
             }
         }
        
@@ -2742,7 +2762,7 @@ class ChatRowItem: TableRowItem {
 
         
         if let reactions = self.reactionsLayout {
-            if reactions.presentation.isOutOfBounds, reactions.mode == .full {
+            if reactions.presentation.isOutOfBounds {
                 rect.size.height -= defaultReactionsInset
                 rect.size.height -= reactions.size.height
             }
@@ -2786,7 +2806,7 @@ class ChatRowItem: TableRowItem {
         
         rect.size.width = max(rect.width, topicLinkWidth + bubbleDefaultInnerInset)
 
-        if let reactions = reactionsLayout, reactions.mode == .full, !reactions.presentation.isOutOfBounds {
+        if let reactions = reactionsLayout, !reactions.presentation.isOutOfBounds {
             rect.size.width = max(reactions.size.width + bubbleDefaultInnerInset, rect.width)
         }
         
@@ -3033,7 +3053,7 @@ class ChatRowItem: TableRowItem {
                 }
             }
             if let reaction = reaction {
-                context.reactions.react(messageId, values: message.newReactions(with: reaction.toUpdate()))
+                context.reactions.react(messageId, values: message.newReactions(with: reaction.toUpdate(), isTags: context.peerId == message.id.peerId))
             }
         }
         return false
@@ -3062,24 +3082,27 @@ class ChatRowItem: TableRowItem {
             }
             |> take(1)
             
-            var orderedItemListCollectionIds: [Int32] = []
+            let isTags = context.peerId == peerId && tagsGloballyEnabled
+
             
-            orderedItemListCollectionIds.append(Namespaces.OrderedItemList.CloudRecentReactions)
-            orderedItemListCollectionIds.append(Namespaces.OrderedItemList.CloudTopReactions)
-     
-            let reactions:Signal<[RecentReactionItem], NoError> = context.diceCache.emojies_reactions |> map { view in
+            
+            let reactions:Signal<[RecentReactionItem], NoError> = context.diceCache.top_reactions |> map { view in
                 
                 var recentReactionsView: OrderedItemListView?
                 var topReactionsView: OrderedItemListView?
+                var defaultTagReactions: OrderedItemListView?
                 for orderedView in view.orderedItemListsViews {
                     if orderedView.collectionId == Namespaces.OrderedItemList.CloudRecentReactions {
                         recentReactionsView = orderedView
                     } else if orderedView.collectionId == Namespaces.OrderedItemList.CloudTopReactions {
                         topReactionsView = orderedView
+                    } else if orderedView.collectionId == Namespaces.OrderedItemList.CloudDefaultTagReactions {
+                        defaultTagReactions = orderedView
                     }
                 }
                 var recentReactionsItems:[RecentReactionItem] = []
                 var topReactionsItems:[RecentReactionItem] = []
+                var defaultTagReactionsItems:[RecentReactionItem] = []
 
                 if let recentReactionsView = recentReactionsView {
                     for item in recentReactionsView.items {
@@ -3089,6 +3112,14 @@ class ChatRowItem: TableRowItem {
                         recentReactionsItems.append(item)
                     }
                 }
+                if let defaultTagReactions = defaultTagReactions {
+                    for item in defaultTagReactions.items {
+                        guard let item = item.contents.get(RecentReactionItem.self) else {
+                            continue
+                        }
+                        defaultTagReactionsItems.append(item)
+                    }
+                }
                 if let topReactionsView = topReactionsView {
                     for item in topReactionsView.items {
                         guard let item = item.contents.get(RecentReactionItem.self) else {
@@ -3096,6 +3127,9 @@ class ChatRowItem: TableRowItem {
                         }
                         topReactionsItems.append(item)
                     }
+                }
+                if !defaultTagReactionsItems.isEmpty, isTags {
+                    return defaultTagReactionsItems
                 }
                 return topReactionsItems.filter { value in
                     if context.isPremium {
@@ -3124,11 +3158,12 @@ class ChatRowItem: TableRowItem {
                 var accessToAll: Bool
                 
                 let isSelected:(MessageReaction.Reaction)->Bool = { reaction in
-                    return message.effectiveReactions?.contains(where: { $0.value == reaction && $0.isSelected }) ?? false
+                    return message.effectiveReactions(isTags: isTags)?.contains(where: { $0.value == reaction && $0.isSelected }) ?? false
                 }
 
-                
-                if peer.isChannel {
+                if isTags {
+                    accessToAll = true
+                } else if peer.isChannel {
                    accessToAll = false
                 } else if let peerAllowed = peerAllowed {
                     switch peerAllowed {
@@ -3188,8 +3223,9 @@ class ChatRowItem: TableRowItem {
                 if let value = context.appConfiguration.data?["reactions_uniq_max"] as? Double {
                     uniqueLimit = Int(value)
                 }
+                
                             
-                if let reactions = message.effectiveReactions, reactions.count >= uniqueLimit {
+                if let reactions = message.effectiveReactions(isTags: isTags), reactions.count >= uniqueLimit {
                     available = reactions.compactMap { reaction in
                         switch reaction.value {
                         case let .custom(fileId):
@@ -3223,11 +3259,42 @@ class ChatRowItem: TableRowItem {
                     available = Array(available.prefix(7))
                 }
                 
+                if isTags, !context.isPremium {
+                   accessToAll = false
+                }
+                
                 
                 let width = ContextAddReactionsListView.width(for: available.count, maxCount: 7, allowToAll: accessToAll)
+                let aboveText: String?
+                if isTags {
+                    if context.isPremium {
+                        aboveText = strings().chatReactionsTagMessage
+                    } else {
+                        aboveText = strings().chatReactionsTagMessagePremium
+                    }
+                } else {
+                    aboveText = nil
+                }
                 
+                let w_width = width + 20 + (accessToAll ? 0 : 0)
                 
-                let rect = NSMakeRect(0, 0, width + 20 + (accessToAll ? 0 : 0), 40 + 20)
+                let aboveLayout: TextViewLayout?
+                if let aboveText = aboveText {
+                    let color = theme.colors.darkGrayText.withAlphaComponent(0.8)
+                    let link = theme.colors.link.withAlphaComponent(0.8)
+                    let attributed = parseMarkdownIntoAttributedString(aboveText, attributes: .init(body: .init(font: .normal(.text), textColor: color), bold: .init(font: .medium(.text), textColor: color), link: .init(font: .normal(.text), textColor: link), linkAttribute: { link in
+                        return (NSAttributedString.Key.link.rawValue, inAppLink.callback("", { _ in
+                            showModal(with: PremiumBoardingController(context: context, source: .saved_tags, openFeatures: true), for: context.window)
+                        }))
+                    })).detectBold(with: .medium(.text))
+                    aboveLayout = TextViewLayout(attributed, maximumNumberOfLines: 2, alignment: .center)
+                    aboveLayout?.measure(width: w_width - 24)
+                    aboveLayout?.interactions = globalLinkExecutor
+                } else {
+                    aboveLayout = nil
+                }
+                
+                let rect = NSMakeRect(0, 0, w_width, 40 + 20 + (aboveLayout != nil ? aboveLayout!.layoutSize.height + 4 : 0))
                 
                 
                 let panel = Window(contentRect: rect, styleMask: [.fullSizeContentView], backing: .buffered, defer: false)
@@ -3239,12 +3306,12 @@ class ChatRowItem: TableRowItem {
                 panel.hasShadow = false
                 
 
-                let reveal:((NSView & StickerFramesCollector)->Void)?
+                let reveal:((ContextAddReactionsListView & StickerFramesCollector)->Void)?
                 
                 
                 var selectedItems: [EmojiesSectionRowItem.SelectedItem] = []
 
-                if let reactions = message.effectiveReactions {
+                if let reactions = message.effectiveReactions(isTags: isTags) {
                     for reaction in reactions {
                         if reaction.isSelected {
                             switch reaction.value {
@@ -3266,15 +3333,35 @@ class ChatRowItem: TableRowItem {
                             } else {
                                 value = .custom(fileId: sticker.file.fileId.id, file: sticker.file)
                             }
-                            if case .custom = value, !context.isPremium {
-                                showModalText(for: context.window, text: strings().customReactionPremiumAlert, callback: { _ in
-                                    showModal(with: PremiumBoardingController(context: context, source: .premium_stickers), for: context.window)
-                                })
+                            var contains: Bool = false
+                            for reaction in reactions {
+                                switch reaction.content {
+                                case let .custom(file):
+                                    if file.fileId == sticker.file.fileId {
+                                        contains = true
+                                        break
+                                    }
+                                default:
+                                    break
+                                }
+                            }
+                            
+                            if isTags, !context.isPremium {
+                                showModal(with: PremiumBoardingController(context: context, source: .saved_tags, openFeatures: true), for: context.window)
                             } else {
-                                let updated = message.newReactions(with: value)
-                                context.reactions.react(message.id, values: updated, fromRect: fromRect, storeAsRecentlyUsed: true)
+                                if case .custom = value, !context.isPremium && sticker.file.isPremiumEmoji, !contains {
+                                    showModalText(for: context.window, text: strings().customReactionPremiumAlert, callback: { _ in
+                                        showModal(with: PremiumBoardingController(context: context, source: .premium_stickers), for: context.window)
+                                    })
+                                } else {
+                                    let updated = message.newReactions(with: value, isTags: isTags)
+                                    context.reactions.react(message.id, values: updated, fromRect: fromRect, storeAsRecentlyUsed: true)
+                                }
                             }
                         })
+//                        let transition = ContainedViewLayoutTransition.animated(duration: 0.2, curve: .easeOut)
+//                        transition.updateFrame(view: view, frame: CGRect(origin: view.frame.origin, size: NSMakeSize(view.frame.width, 60)))
+//                        view.updateLayout(size: view.frame.size, transition: transition)
                         window.show(view)
                     }
                 } else {
@@ -3283,8 +3370,12 @@ class ChatRowItem: TableRowItem {
                 
                 
                 let view = ContextAddReactionsListView(frame: rect, context: context, list: available, add: { value, checkPrem, fromRect in
-                    context.reactions.react(message.id, values: message.newReactions(with: value.toUpdate()), fromRect: fromRect, storeAsRecentlyUsed: true)
-                }, radiusLayer: nil, revealReactions: reveal)
+                    if isTags, !context.isPremium {
+                        showModal(with: PremiumBoardingController(context: context, source: .saved_tags, openFeatures: true), for: context.window)
+                    } else {
+                        context.reactions.react(message.id, values: message.newReactions(with: value.toUpdate(), isTags: isTags), fromRect: fromRect, storeAsRecentlyUsed: true)
+                    }
+                }, radiusLayer: nil, revealReactions: reveal, aboveText: aboveLayout)
                 
                 
                 panel.contentView?.addSubview(view)
@@ -3369,19 +3460,14 @@ class ChatRowItem: TableRowItem {
     }
     var lastLineContentWidth: LastLineData? {
         if let reactionsLayout = reactionsLayout {
-            switch reactionsLayout.mode {
-            case .full:
-                var oneLine = reactionsLayout.oneLine
-                if let item = self as? ChatMessageItem {
-                    if item.webpageLayout != nil {
-                        oneLine = false
-                    }
+            var oneLine = reactionsLayout.oneLine
+            if let item = self as? ChatMessageItem {
+                if item.webpageLayout != nil {
+                    oneLine = false
                 }
-                if !reactionsLayout.presentation.isOutOfBounds {
-                    return LastLineData(width: reactionsLayout.lastLineSize.width, single: oneLine)
-                }
-            default:
-                break
+            }
+            if !reactionsLayout.presentation.isOutOfBounds {
+                return LastLineData(width: reactionsLayout.lastLineSize.width, single: oneLine)
             }
         }
         if captionLayouts.count == 1 {

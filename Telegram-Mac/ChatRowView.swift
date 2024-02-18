@@ -13,7 +13,8 @@ import TGModernGrowingTextView
 import Postbox
 import SwiftSignalKit
 import InputView
-
+import MetalEngine
+import DustLayer
 
 class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDelegate, RevealTableView {
     
@@ -375,6 +376,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         renderLayoutType(item, animated: true)
 
         updateColors()
+        updateMouse()
         item.chatInteraction.focusInputField()
         super.onCloseContextMenu()
     }
@@ -383,6 +385,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         guard let item = item as? ChatRowItem else {return}
         renderLayoutType(item, animated: true)
         updateColors()
+        updateMouse()
         super.onCloseContextMenu()
     }
     
@@ -440,10 +443,10 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     
     override func updateMouse() {
         if let shareView = self.shareView, let item = item as? ChatRowItem {
-            shareView.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() ? 1.0 : 0.0, animated: true)
+            shareView.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() && contextMenu == nil ? 1.0 : 0.0, animated: true)
         }
         if let commentsView = self.channelCommentsBubbleSmallControl, let item = item as? ChatRowItem {
-            commentsView.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() ? 1.0 : 0.0, animated: true)
+            commentsView.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() && contextMenu == nil  ? 1.0 : 0.0, animated: true)
         }
     }
     
@@ -565,7 +568,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         var rect = NSMakeRect(item.leftInset, 6, 36, 36)
 
         if item.isBubbled {
-            rect.origin.y = frame.height - 36
+            rect.origin.y = item.height - 36
         }
         
         return rect
@@ -1046,12 +1049,8 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
             }
             
             view?.view.update(layout.layout)
-            
-
-            if let view = view {
-                updateInlineStickers(context: item.context, view: view.view, textLayout: layout.layout)
-            }
         }
+        updateInlineStickers(context: item.context, view: self.captionViews.map { $0.view })
     }
 
     
@@ -1083,7 +1082,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         return super.isEmojiLite
     }
     
-    func updateInlineStickers(context: AccountContext, view textView: TextView, textLayout: TextViewLayout) {
+    func updateInlineStickers(context: AccountContext, view textViews: [TextView]) {
         
         guard let item = self.item as? ChatRowItem else {
             return
@@ -1091,45 +1090,55 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         let textColor = item.presentation.chat.textColor(item.isIncoming, item.renderType == .bubble)
         
         var validIds: [InlineStickerItemLayer.Key] = []
-        var index: Int = textView.hashValue
-        
-        for item in textLayout.embeddedItems {
-            if let stickerItem = item.value as? InlineStickerItem, case let .attribute(emoji) = stickerItem.source {
-                
-                let id = InlineStickerItemLayer.Key(id: emoji.fileId, index: index, color: textColor)
-                validIds.append(id)
-                
-                
-                let rect: NSRect
-                if textLayout.isBigEmoji {
-                    rect = item.rect
-                } else {
-                    rect = item.rect.insetBy(dx: -2, dy: -2)
-                }
-                
-                let view: InlineStickerItemLayer
-                if let current = self.inlineStickerItemViews[id], current.frame.size == rect.size, textColor == current.textColor {
-                    view = current
-                } else {
-                    self.inlineStickerItemViews[id]?.removeFromSuperlayer()
-                    view = InlineStickerItemLayer(account: context.account, inlinePacksContext: context.inlinePacksContext, emoji: emoji, size: rect.size, textColor: textColor)
-                    self.inlineStickerItemViews[id] = view
-                    view.superview = textView
-                    textView.addEmbeddedLayer(view)
-                }
-                index += 1
-                var isKeyWindow: Bool = false
-                if let window = window {
-                    if !window.canBecomeKey {
-                        isKeyWindow = true
-                    } else {
-                        isKeyWindow = window.isKeyWindow
+        var index: Int = 0
+
+        for textView in textViews {
+            if let textLayout = textView.textLayout {
+                for item in textLayout.embeddedItems {
+                    if let stickerItem = item.value as? InlineStickerItem, case let .attribute(emoji) = stickerItem.source {
+                        
+                        let id = InlineStickerItemLayer.Key(id: emoji.fileId, index: index + textView.hashValue, color: textColor)
+                        validIds.append(id)
+                        
+                        
+                        let rect: NSRect
+                        if textLayout.isBigEmoji {
+                            rect = item.rect
+                        } else {
+                            rect = item.rect.insetBy(dx: -2, dy: -2)
+                        }
+                        
+                        let view: InlineStickerItemLayer
+                        if let current = self.inlineStickerItemViews[id], current.frame.size == rect.size, textColor == current.textColor {
+                            view = current
+                        } else {
+                            self.inlineStickerItemViews[id]?.removeFromSuperlayer()
+                            view = InlineStickerItemLayer(account: context.account, inlinePacksContext: context.inlinePacksContext, emoji: emoji, size: rect.size, textColor: textColor)
+                            self.inlineStickerItemViews[id] = view
+                            view.superview = textView
+                            textView.addEmbeddedLayer(view)
+                        }
+                        
+                        if view.superview != textView {
+                            textView.addEmbeddedLayer(view)
+                        }
+                        
+                        index += 1
+                        var isKeyWindow: Bool = false
+                        if let window = window {
+                            if !window.canBecomeKey {
+                                isKeyWindow = true
+                            } else {
+                                isKeyWindow = window.isKeyWindow
+                            }
+                        }
+                        view.isPlayable = NSIntersectsRect(rect, textView.visibleRect) && isKeyWindow
+                        view.frame = rect
                     }
                 }
-                view.isPlayable = NSIntersectsRect(rect, textView.visibleRect) && isKeyWindow
-                view.frame = rect
             }
         }
+       
         
         var removeKeys: [InlineStickerItemLayer.Key] = []
         for (key, itemLayer) in self.inlineStickerItemViews {
@@ -1383,7 +1392,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     }
     
     func fillReactions(_ item: ChatRowItem, animated: Bool) {
-        if let reactionsLayout = item.reactionsLayout, reactionsLayout.mode == .full  {
+        if let reactionsLayout = item.reactionsLayout  {
             if reactionsView == nil {
                 reactionsView = ChatReactionsView(frame: reactionsRect(item))
                 rowView.addSubview(reactionsView!)
@@ -1896,7 +1905,27 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     
     override func forceClick(in location: NSPoint) {
             
+       
+        
         if let item = self.item as? ChatRowItem, item.chatInteraction.presentation.state != .editing {
+            
+//            let table = item.table!
+//            let rect = item.context.window.contentView!.bounds
+//            let metalLayer = DustLayer()
+//            let view = View(frame: rect)
+//            view.layer?.addSublayer(metalLayer)
+//            item.context.window.contentView?.addSubview(view)
+//            metalLayer.frame = rect
+//            metalLayer.isInHierarchy = true
+//
+//            
+//            metalLayer.addItem(frame: CGRect(origin: view.focus(rowView.frame.size).origin, size: rowView.frame.size), image: self.rowView.snapshot)
+//            metalLayer.becameEmpty = { [weak view] in
+//                view?.removeFromSuperview()
+//            }
+//            
+//            return
+            
             let result: Bool
             switch FastSettings.forceTouchAction {
             case .edit:

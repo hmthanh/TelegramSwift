@@ -26,7 +26,8 @@ import WebKit
 import System
 import CodeSyntax
 import MetalEngine
-
+import TelegramMedia
+import RLottie
 
 #if !APP_STORE
 import AppCenter
@@ -150,6 +151,10 @@ private final class CtxInstallLayer : SimpleLayer {
     }
 }
 
+extension RLottieBridge : R_LottieBridge {
+   
+}
+
 
 @NSApplicationMain
 class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterDelegate, NSWindowDelegate {
@@ -249,6 +254,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         
+       // NSApplication.shared.applicationIconImage = NSImage(named: "PremiumBlack")
       
 //        window.styleMask.insert(.fullSizeContentView)
 //        window.styleMask.insert(.unifiedTitleAndToolbar)
@@ -272,14 +278,15 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         
         initializeSelectManager()
         startLottieCacheCleaner()
-                
-        if #available(OSX 10.12.2, *) {
-            NSApplication.shared.isAutomaticCustomizeTouchBarMenuItemEnabled = true
+        
+        makeRLottie = { json, key in
+            return RLottieBridge(json: json, key: key)
         }
         
         guard let containerUrl = ApiEnvironment.containerURL else {
             return
         }
+        
         
         self.containerUrl = containerUrl.path
         
@@ -292,8 +299,12 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         window.contentView?.autoresizingMask = [.width, .height]
         window.contentView?.autoresizesSubviews = true
         
-//        v.layer?.addSublayer(MetalEngine.shared.rootLayer)
 
+//        delay(2.0, closure: {
+        #if arch(arm64)
+            v.layer?.addSublayer(MetalEngine.shared.rootLayer)
+        #endif
+//        })
         
 //        let ctxLayer = CtxInstallLayer()
 //        self.ctxLayer = ctxLayer
@@ -357,7 +368,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         
         mw = window
         
-        #if !APP_STORE
+        #if BETA || DEBUG
             if let secret = Bundle.main.infoDictionary?["APPCENTER_SECRET"] as? String {
                 AppCenter.start(withAppSecret: secret, services: [Crashes.self])
             }
@@ -770,7 +781,8 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                         } else {
                             
                             if let _ = threadData {
-                                _ = ForumUI.openTopic(makeMessageThreadId(threadId), peerId: threadId.peerId, context: contextValue.context).start()
+                                
+                                _ = ForumUI.openTopic(Int64(threadId.id), peerId: threadId.peerId, context: contextValue.context).start()
                             } else if let fromId = fromId {
                                 let signal:Signal<ThreadInfo, FetchChannelReplyThreadMessageError> = fetchAndPreloadReplyThreadInfo(context: contextValue.context, subject: .channelPost(threadId))
                                 

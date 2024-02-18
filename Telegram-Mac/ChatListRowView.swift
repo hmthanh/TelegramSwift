@@ -12,6 +12,7 @@ import SwiftSignalKit
 import TelegramCore
 import Postbox
 import Accelerate
+import TelegramMedia
 
 private let badgeDiameter = floor(15.0 * 20.0 / 17.0)
 private let avatarBadgeDiameter: CGFloat = floor(floor(15.0 * 22.0 / 17.0))
@@ -1066,6 +1067,9 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             if item.isForum && !item.isTopic, !isResorting {
                 return .clear
             }
+            if case .savedMessageIndex = item.entryId {
+                return theme.colors.background
+            }
             if item.isCollapsed {
                 return theme.colors.grayBackground
             }
@@ -1751,12 +1755,24 @@ class ChatListRowView: TableRowView, ViewDisplayDelegate, RevealTableView {
             
             photo.setState(account: item.context.account, state: item.photo)
 
-            if item.isSavedMessage {
+            if item.isAnonynousSavedMessage {
+                self.archivedPhoto?.removeFromSuperview()
+                self.archivedPhoto = nil
+                let icon = theme.icons.chat_hidden_author
+                photo.setState(account: item.context.account, state: .Empty)
+                photo.setSignal(generateEmptyPhoto(photo.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photo.frame.size.width - 5, photo.frame.size.height - 5)), cornerRadius: nil)) |> map {($0, false)})
+            } else if item.isSavedMessage, case .savedMessages = item.mode {
+                self.archivedPhoto?.removeFromSuperview()
+                self.archivedPhoto = nil
+                let icon = theme.icons.chat_my_notes
+                photo.setState(account: item.context.account, state: .Empty)
+                photo.setSignal(generateEmptyPhoto(photo.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photo.frame.size.width - 5, photo.frame.size.height - 5)), cornerRadius: nil)) |> map {($0, false)})
+            } else if item.isSavedMessage {
                 self.archivedPhoto?.removeFromSuperview()
                 self.archivedPhoto = nil
                 let icon = theme.icons.searchSaved
                 photo.setState(account: item.context.account, state: .Empty)
-                photo.setSignal(generateEmptyPhoto(photo.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photo.frame.size.width - 20, photo.frame.size.height - 20)), cornerRadius: nil)) |> map {($0, false)})
+                photo.setSignal(generateEmptyPhoto(photo.frame.size, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photo.frame.size.width - 20, photo.frame.size.height - 20)), cornerRadius: item.displayAsTopics ? 20 : nil)) |> map {($0, false)})
             } else if item.isRepliesChat {
                 self.archivedPhoto?.removeFromSuperview()
                 self.archivedPhoto = nil

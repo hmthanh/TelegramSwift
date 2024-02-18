@@ -14,6 +14,7 @@ import Postbox
 import SwiftSignalKit
 import Contacts
 import ColorPalette
+import TelegramMedia
 
 class ChatContactRowItem: ChatRowItem {
 
@@ -112,6 +113,8 @@ class ChatContactRowView : ChatRowView {
         
         required init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
+            
+            isDynamicColorUpdateLocked = true
             
             self.layer?.addSublayer(dashLayer)
             

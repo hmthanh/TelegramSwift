@@ -22,7 +22,7 @@ import InAppPurchaseManager
 import ApiCredentials
 
 let clown: String = "🤡"
-
+let tagsGloballyEnabled = true
 
 
 public struct PremiumConfiguration {
@@ -188,6 +188,11 @@ struct AntiSpamBotConfiguration {
 protocol ChatLocationContextHolder: AnyObject {
 }
 
+extension ChatReplyThreadMessage {
+    var effectiveTopId: MessageId {
+        return self.channelMessageId ?? MessageId(peerId: self.peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: self.threadId))
+    }
+}
 
 
 enum ChatLocation: Equatable {
@@ -196,12 +201,17 @@ enum ChatLocation: Equatable {
 }
 
 extension ChatLocation {
+    
+    static func makeSaved(_ accountPeerId: PeerId, peerId: PeerId) -> ChatLocation {
+        return .thread(.init(peerId: accountPeerId, threadId: peerId.toInt64(), channelMessageId: nil, isChannelPost: false, isForumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
+    }
+    
     var unreadMessageCountsItem: UnreadMessageCountsItem {
         switch self {
         case let .peer(peerId):
             return .peer(id: peerId, handleThreads: false)
         case let .thread(data):
-            return .peer(id: data.messageId.peerId, handleThreads: false)
+            return .peer(id: data.peerId, handleThreads: false)
         }
     }
     
@@ -210,7 +220,7 @@ extension ChatLocation {
         case let .peer(peerId):
             return .peer(peerId: peerId, components: [])
         case let .thread(data):
-            return .peer(peerId: data.messageId.peerId, components: [])
+            return .peer(peerId: data.peerId, components: [])
         }
     }
     
@@ -219,7 +229,7 @@ extension ChatLocation {
         case let .peer(peerId):
             return .peer(peerId)
         case let .thread(data):
-            return .peer(data.messageId.peerId)
+            return .peer(data.peerId)
         }
     }
     
@@ -228,7 +238,7 @@ extension ChatLocation {
         case let .peer(peerId):
             return peerId
         case let .thread(data):
-            return data.messageId.peerId
+            return data.peerId
         }
     }
     var threadId: Int64? {
@@ -236,7 +246,7 @@ extension ChatLocation {
         case .peer:
             return nil
         case let .thread(replyThreadMessage):
-            return makeMessageThreadId(replyThreadMessage.messageId) //Int64(replyThreadMessage.messageId.id)
+            return replyThreadMessage.threadId
         }
     }
     var threadMsgId: MessageId? {
@@ -244,7 +254,15 @@ extension ChatLocation {
         case .peer:
             return nil
         case let .thread(replyThreadMessage):
-            return replyThreadMessage.messageId
+            return replyThreadMessage.effectiveTopId
+        }
+    }
+    var threadMessage: ChatReplyThreadMessage? {
+        switch self {
+        case .peer:
+            return nil
+        case let .thread(replyThreadMessage):
+            return replyThreadMessage
         }
     }
 
@@ -320,6 +338,7 @@ final class AccountContext {
     let activeSessionsContext: ActiveSessionsContext
     let webSessions: WebSessionsContext
     let reactions: Reactions
+    let dockControl: DockControl
     private(set) var reactionSettings: ReactionSettings = ReactionSettings.default
     private let reactionSettingsDisposable = MetaDisposable()
     private var chatInterfaceTempState:[PeerId : ChatInterfaceTempState] = [:]
@@ -337,6 +356,8 @@ final class AccountContext {
         return _cloudThemes.get() |> deliverOnMainQueue
     }
     #endif
+    
+    
     
     private let _emoticonThemes = Atomic<[(String, TelegramPresentationTheme)]>(value: [])
     var emoticonThemes: [(String, TelegramPresentationTheme)] {
@@ -529,6 +550,7 @@ final class AccountContext {
         self.webSessions = engine.privacy.webSessions()
         self.networkStatusManager = NetworkStatusManager(account: account, window: window, sharedContext: sharedContext)
         self.reactions = Reactions(engine)
+        self.dockControl = DockControl(engine, accountManager: sharedContext.accountManager)
         #endif
         
         
@@ -558,6 +580,9 @@ final class AccountContext {
         prefDisposable.add((account.postbox.peerView(id: account.peerId) |> deliverOnMainQueue).start(next: { [weak self] peerView in
             self?._myPeer = peerView.peers[peerView.peerId]
         }))
+        
+        
+       
         
         
         #if !SHARE
@@ -731,6 +756,7 @@ final class AccountContext {
            }))
 
         
+        
         let autoplayMedia = _autoplayMedia
         prefDisposable.add(account.postbox.preferencesView(keys: [ApplicationSpecificPreferencesKeys.autoplayMedia]).start(next: { view in
             _ = autoplayMedia.swap(view.values[ApplicationSpecificPreferencesKeys.autoplayMedia]?.get(AutoplayMediaPreferences.self) ?? AutoplayMediaPreferences.defaultSettings)
@@ -803,28 +829,6 @@ final class AccountContext {
         NotificationCenter.default.addObserver(self, selector: #selector(updateKeyWindow), name: NSWindow.didBecomeKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(updateKeyWindow), name: NSWindow.didResignKeyNotification, object: window)
         
-//        var shouldReindex: Signal<SomeAccountSettings, NoError> = someAccountSetings(postbox: account.postbox) |> filter { value -> Bool in
-//            if value.appVersion != ApiEnvironment.version {
-//                return true
-//            } else if let time = value.lastChatReindexTime {
-//                return Int32(Date().timeIntervalSince1970) > time
-//            } else {
-//                return true
-//            }
-//        } |> deliverOnMainQueue
-//
-//        shouldReindex = (shouldReindex |> then(.complete() |> suspendAwareDelay(60 * 60, queue: Queue.mainQueue()))) |> restart
-//
-//        shouldReindexCacheDisposable.set(shouldReindex.start(next: { [weak self] _ in
-//            self?.reindexCacheDisposable.set(engine.resources.reindexCacheInBackground(lowImpact: true).start())
-//            _ = updateSomeSettingsInteractively(postbox: account.postbox, { settings in
-//                var settings = settings
-//                settings.lastChatReindexTime = Int32(Date().timeIntervalSince1970) + 2 * 60 * 60 * 24
-//                settings.appVersion = ApiEnvironment.version
-//                return settings
-//            }).start()
-//        }))
-//
         
         #if !SHARE
         var freeSpaceSignal:Signal<UInt64?, NoError> = Signal { subscriber in
@@ -864,11 +868,8 @@ final class AccountContext {
             CallSessionManagerImplementationVersion(version: version, supportsVideo: supportsVideo)
         })
         
-//        reactions.needsPremium = { [weak self] in
-//            if let strongSelf = self {
-//                showModal(with: PremiumReactionsModal(context: strongSelf), for: strongSelf.window)
-//            }
-//        }
+        actionsDisposable.add(requestApplicationIcons(engine: engine).start())
+
         
         #endif
         
@@ -883,6 +884,7 @@ final class AccountContext {
         self.globalLocationDisposable.set(globalPeerHandler.get().start(next: { [weak self] value in
             _ = self?._globalLocationId.swap(value)
         }))
+        
         
     }
     
@@ -993,6 +995,7 @@ final class AccountContext {
         _chatThemes.set(.single([]))
         _cloudThemes.set(.single(.init(themes: [], list: [:], default: nil, custom: nil)))
         reactionSettingsDisposable.dispose()
+        dockControl.clear()
         #endif
     }
    
@@ -1016,11 +1019,11 @@ final class AccountContext {
         case let .peer(peerId):
             return .peer(peerId: peerId, threadId: nil)
         case let .thread(data):
-            if data.isForumPost {
-                return .peer(peerId: data.messageId.peerId, threadId: makeMessageThreadId(data.messageId))
+            if data.isForumPost || data.peerId.namespace != Namespaces.Peer.CloudChannel {
+                return .peer(peerId: data.peerId, threadId: data.threadId)
             } else {
                 let context = chatLocationContext(holder: contextHolder, account: self.account, data: data)
-                return .thread(peerId: data.messageId.peerId, threadId: makeMessageThreadId(data.messageId), data: context.state)
+                return .thread(peerId: data.peerId, threadId: data.threadId, data: context.state)
             }
         }
     }
@@ -1031,7 +1034,7 @@ final class AccountContext {
             return .single(nil)
         case let .thread(data):
             if data.isForumPost {
-                let viewKey: PostboxViewKey = .messageHistoryThreadInfo(peerId: data.messageId.peerId, threadId: Int64(data.messageId.id))
+                let viewKey: PostboxViewKey = .messageHistoryThreadInfo(peerId: data.peerId, threadId: data.threadId)
                 return self.account.postbox.combinedView(keys: [viewKey])
                 |> map { views -> MessageId? in
                     if let threadInfo = views.views[viewKey] as? MessageHistoryThreadInfoView, let data = threadInfo.info?.data.get(MessageHistoryThreadData.self) {
@@ -1040,10 +1043,13 @@ final class AccountContext {
                         return nil
                     }
                 }
-            } else {
+            } else if data.peerId.namespace == Namespaces.Peer.CloudChannel {
                 let context = chatLocationContext(holder: contextHolder, account: self.account, data: data)
                 return context.maxReadOutgoingMessageId
+            } else {
+                return .single(nil)
             }
+
         }
     }
 
@@ -1065,7 +1071,7 @@ final class AccountContext {
             }
         case let .thread(data):
             if data.isForumPost {
-                let viewKey: PostboxViewKey = .messageHistoryThreadInfo(peerId: data.messageId.peerId, threadId: Int64(data.messageId.id))
+                let viewKey: PostboxViewKey = .messageHistoryThreadInfo(peerId: data.peerId, threadId: data.threadId)
                 return self.account.postbox.combinedView(keys: [viewKey])
                 |> map { views -> Int in
                     if let threadInfo = views.views[viewKey] as? MessageHistoryThreadInfoView, let data = threadInfo.info?.data.get(MessageHistoryThreadData.self) {
@@ -1074,6 +1080,8 @@ final class AccountContext {
                         return 0
                     }
                 }
+            } else if data.peerId.namespace != Namespaces.Peer.CloudChannel {
+                return .single(0)
             } else {
                 let context = chatLocationContext(holder: contextHolder, account: self.account, data: data)
                 return context.unreadCount
@@ -1385,7 +1393,7 @@ private final class ChatLocationContextHolderImpl: ChatLocationContextHolder {
     let context: ReplyThreadHistoryContext
     
     init(account: Account, data: ChatReplyThreadMessage) {
-        self.context = ReplyThreadHistoryContext(account: account, peerId: data.messageId.peerId, data: data)
+        self.context = ReplyThreadHistoryContext(account: account, peerId: data.peerId, data: data)
     }
 }
 
